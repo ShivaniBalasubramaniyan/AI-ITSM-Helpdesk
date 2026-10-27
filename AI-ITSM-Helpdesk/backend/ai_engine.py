@@ -158,6 +158,24 @@ class AIEngine:
         history: Optional[List[Dict[str, str]]] = None
     ) -> Dict[str, Any]:
         user_text = user_message.strip()
+        lower_text = user_text.lower().strip("!.,? ")
+
+        # Check for simple greetings
+        greetings = {"hi", "hello", "hey", "good morning", "good afternoon", "good evening", "greetings", "howdy", "yo", "sup", "hola"}
+        if lower_text in greetings:
+            return {
+                "reply": "Hello! I am your AI Helpdesk Copilot. How can I assist you with your IT services, devices, or access today? You can describe an issue (like VPN connectivity or password resets), ask technical questions, or let me know if you'd like to log a ticket.",
+                "confidence": 0.99,
+                "suggested_kb_articles": [],
+                "troubleshooting_steps": [
+                    "Describe your technical problem or symptom",
+                    "Or select one of the common IT diagnostic cards above",
+                    "I will match approved runbooks or prepare a tracked support ticket"
+                ],
+                "can_auto_resolve": False,
+                "suggested_ticket": None
+            }
+
         relevant_articles = kb_service.search_relevant(user_text, top_k=2)
 
         # Classify the potential ticket if user wants to create one
@@ -222,9 +240,18 @@ class AIEngine:
                 f"I can automatically open an incident ticket with our **{classification['suggested_team']}** team for you."
             )
 
+        # Ensure title and description are robust and meet database/pydantic requirements
+        formatted_title = user_text[:80].strip()
+        if len(formatted_title) < 5:
+            formatted_title = f"IT Assistance: {formatted_title.capitalize()}" if formatted_title else "IT Support Request"
+
+        formatted_desc = user_text.strip()
+        if len(formatted_desc) < 5:
+            formatted_desc = f"{formatted_title}. Reported by employee via AI Helpdesk Copilot."
+
         suggested_ticket = {
-            "title": user_text[:80],
-            "description": user_text,
+            "title": formatted_title,
+            "description": formatted_desc,
             "category": classification["category"],
             "priority": classification["priority"],
             "urgency": classification["urgency"],
@@ -251,4 +278,127 @@ class AIEngine:
             "suggested_ticket": suggested_ticket
         }
 
+    def diagnose_and_resolve_ticket(self, ticket: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Deep Root-Cause & Automated Solution Engine:
+        Analyzes an incident, matches appropriate Knowledge Base Runbooks,
+        determines root causes and blast radius, and prepares actionable 1-click resolution notes.
+        """
+        title = ticket.get("title", "")
+        description = ticket.get("description", "")
+        category = ticket.get("category", "Software")
+        query_text = f"{title} {description} {category}"
+        
+        matches = kb_service.search_relevant(query_text, top_k=2)
+        top_kb = matches[0] if matches else None
+        
+        lower_q = query_text.lower()
+        
+        if "vpn" in lower_q or "anyconnect" in lower_q:
+            root_cause = "Certificate expiration, MTU mismatch, or corrupted local profile cache in ~/.cisco/vpn."
+            blast_radius = "Remote access blocked for individual user; no enterprise gateway outage detected."
+            prevention = "Deploy automated certificate renewal via Intune and configure fallback secondary gateway DNS."
+            checklist = [
+                "Verify Cisco AnyConnect client version >= 4.10",
+                "Renew user machine certificate in certmgr.msc",
+                "Flush DNS and adjust MTU packet size to 1350 bytes"
+            ]
+            resolution_notes = (
+                "Issue diagnosed and resolved via Runbook KB001 (Cisco AnyConnect VPN Gateway Authentication Timeout). "
+                "Cleared corrupted local profile cache, renewed expired client SSL certificate, and verified tunnel handshake."
+            )
+        elif "password" in lower_q or "okta" in lower_q or "locked" in lower_q or "azure ad" in lower_q:
+            root_cause = "Account locked out due to consecutive failed Kerberos/OAuth attempts from cached mobile credentials."
+            blast_radius = "Single employee SSO access blocked across Microsoft 365, Slack, and Jira."
+            prevention = "Enable Okta Self-Service Password Reset (SSPR) with biometric FIDO2/Passkey validation."
+            checklist = [
+                "Verify employee identity via Manager Duo Push",
+                "Clear bad password lockout in Azure AD portal",
+                "Revoke stale mobile device OAuth refresh tokens"
+            ]
+            resolution_notes = (
+                "Issue diagnosed and resolved via Runbook KB002 (Okta Account Lockout & Password Reset). "
+                "Identity verified via secondary factor, unlocked Azure AD / Okta account, and purged stale mobile session tokens."
+            )
+        elif "outlook" in lower_q or "ost" in lower_q or "mailbox" in lower_q or "email" in lower_q:
+            root_cause = "Corrupted local Outlook OST offline database cache causing MAPI/RPC sync stall."
+            blast_radius = "Desktop client disconnected; webmail (OWA) unaffected."
+            prevention = "Configure Outlook Cached Exchange Mode slider to 1 year and enforce weekly scanpst integrity checks."
+            checklist = [
+                "Verify webmail access at outlook.office.com",
+                "Close Outlook process and rename corrupted .ost file to .old",
+                "Launch Outlook in Safe Mode to rebuild fresh mailbox cache"
+            ]
+            resolution_notes = (
+                "Issue diagnosed and resolved via Runbook KB003 (Outlook Disconnected & OST Corruption). "
+                "Recreated offline Outlook data file (.ost), verified mailbox synchronization with Microsoft 365 Exchange Online."
+            )
+        elif "switch" in lower_q or "wifi" in lower_q or "wi-fi" in lower_q or "network" in lower_q:
+            root_cause = "Access Point PoE port flap or VLAN trunk broadcast storm on building distribution switch."
+            blast_radius = "Departmental / floor-wide Wi-Fi latency or AP dropouts."
+            prevention = "Implement 802.1w Rapid Spanning Tree Protocol (RSTP) and enable automated AP mesh failover."
+            checklist = [
+                "Inspect switch port error counters via SNMP",
+                "Power-cycle affected PoE wireless access points",
+                "Verify DHCP pool lease availability on enterprise router"
+            ]
+            resolution_notes = (
+                "Issue diagnosed and resolved via Runbook KB004 (Core Switch & Wi-Fi Degradation). "
+                "Cleared switch interface error counters, rebooted distribution AP cluster, and verified RSSI signal levels."
+            )
+        elif "license" in lower_q or "pycharm" in lower_q or "docker" in lower_q or "software" in lower_q:
+            root_cause = "Seat allocation exhausted in JetBrains / Docker commercial license pool."
+            blast_radius = "New joiner onboarding blocked from developer workstation provisioning."
+            prevention = "Automate license reclamation for inactive developer seats older than 45 days."
+            checklist = [
+                "Check available license pool in Okta Developer Tools group",
+                "Assign commercial enterprise license token to employee email",
+                "Verify workstation activation via license server handshake"
+            ]
+            resolution_notes = (
+                "Issue diagnosed and resolved via Runbook KB005 (Developer Tooling & Commercial License Provisioning). "
+                "Assigned JetBrains & Docker commercial enterprise seat via Okta group 'grp-devtools-active'."
+            )
+        elif "dock" in lower_q or "monitor" in lower_q or "display" in lower_q or "hardware" in lower_q:
+            root_cause = "Thunderbolt 4 firmware buffer stall and outdated DisplayLink graphics driver."
+            blast_radius = "External display blackout on dual monitors; laptop internal screen operational."
+            prevention = "Push automated Dell Command / Lenovo Vantage driver updates during maintenance windows."
+            checklist = [
+                "Perform full 30-second power drain on Thunderbolt docking station",
+                "Update Intel Iris Xe and DisplayLink graphics drivers",
+                "Reseat certified Thunderbolt 4 40Gbps host cable"
+            ]
+            resolution_notes = (
+                "Issue diagnosed and resolved via Runbook KB006 (Thunderbolt Docking Station Display Flickering). "
+                "Discharged docking station power capacitors, updated DisplayLink drivers, and verified dual 4K 60Hz display output."
+            )
+        else:
+            root_cause = "System service interruption or configuration drift on host workstation."
+            blast_radius = "Isolated to reporting user environment."
+            prevention = "Maintain updated system patches and endpoint compliance profile."
+            checklist = [
+                "Review local system error logs",
+                "Verify network socket and firewall rules",
+                "Apply recommended configuration patch"
+            ]
+            resolution_notes = (
+                "Issue diagnosed and resolved by IT Engineering. "
+                "Applied technical remediation steps according to IT Service Desk standard operating procedures."
+            )
+
+        return {
+            "ticket_id": ticket.get("id"),
+            "matched_kb_id": top_kb["id"] if top_kb else "KB001",
+            "matched_kb_title": top_kb["title"] if top_kb else "IT Standard Operating Procedure",
+            "matched_kb_summary": top_kb["summary"] if top_kb else "Standard operational diagnostic runbook",
+            "root_cause": root_cause,
+            "blast_radius": blast_radius,
+            "prevention_recommendation": prevention,
+            "checklist": checklist,
+            "suggested_resolution_notes": resolution_notes,
+            "confidence": 0.96 if top_kb else 0.88,
+            "can_auto_resolve": True
+        }
+
 ai_engine = AIEngine()
+

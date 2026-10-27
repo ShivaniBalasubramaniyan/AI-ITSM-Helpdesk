@@ -6,8 +6,8 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 
 class TicketBase(BaseModel):
-    title: str = Field(..., min_length=3, max_length=200, examples=["Cannot connect to Cisco AnyConnect VPN"])
-    description: str = Field(..., min_length=5, examples=["Gateway timed out after 30 seconds."])
+    title: str = Field(..., min_length=1, max_length=200, examples=["Cannot connect to Cisco AnyConnect VPN"])
+    description: str = Field(..., min_length=1, examples=["Gateway timed out after 30 seconds."])
     requester: str = Field(default="Employee", examples=["John Doe"])
     department: str = Field(default="Engineering", examples=["Engineering"])
     category: str = Field(default="Software", examples=["Network"])
@@ -117,6 +117,14 @@ class KBArticleDetail(KBArticleSummary):
 class KBFeedbackRequest(BaseModel):
     helpful: bool = Field(..., examples=[True])
 
+class KBArticleCreate(BaseModel):
+    title: str = Field(..., min_length=3, examples=["Kubernetes Cluster Ingress SSL Renewal"])
+    category: str = Field(..., examples=["Infrastructure", "Network", "Security", "Access & Identity", "Software", "Hardware"])
+    tags: Optional[List[str]] = Field(default=[], examples=[["kubernetes", "ssl", "ingress", "cert-manager"]])
+    summary: Optional[str] = None
+    content: str = Field(..., min_length=10, examples=["## Symptoms\n...\n## Resolution Steps\n1. Run kubectl..."])
+    author: Optional[str] = "IT Knowledge Engineering"
+
 class ServiceNowSyncRequest(BaseModel):
     ticket_id: str
 
@@ -133,3 +141,52 @@ class DashboardStatsResponse(BaseModel):
     sla_breakdown: Dict[str, int]
     category_distribution: Dict[str, int]
     priority_distribution: Dict[str, int]
+
+class BulkTicketActionRequest(BaseModel):
+    ticket_ids: List[str] = Field(..., min_length=1)
+    action: str = Field(..., examples=["status", "priority", "reassign", "delete"])
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    assigned_team: Optional[str] = None
+    assigned_agent: Optional[str] = None
+    actor: Optional[str] = "IT Staff"
+    resolution_notes: Optional[str] = None
+
+class BulkTicketActionResponse(BaseModel):
+    status: str
+    action: str
+    affected_count: int
+    affected_ids: List[str]
+    message: str
+
+class AIDiagnosisResponse(BaseModel):
+    ticket_id: str
+    matched_kb_id: Optional[str] = None
+    matched_kb_title: Optional[str] = None
+    matched_kb_summary: Optional[str] = None
+    root_cause: str
+    blast_radius: str
+    prevention_recommendation: str
+    checklist: List[str]
+    suggested_resolution_notes: str
+    confidence: float
+    can_auto_resolve: bool
+
+class AIResolveRequest(BaseModel):
+    resolution_notes: Optional[str] = None
+    actor: Optional[str] = "AI Autonomous Resolver (Copilot)"
+
+class TicketCommentCreate(BaseModel):
+    body: str = Field(..., min_length=1, examples=["Verified user credentials in Okta."])
+    author: Optional[str] = "IT Staff"
+    author_role: Optional[str] = "IT Support Engineer"
+    is_internal: Optional[bool] = False
+
+class TicketCommentResponse(BaseModel):
+    id: str
+    ticket_id: str
+    author: str
+    author_role: str
+    body: str
+    is_internal: bool
+    created_at: str

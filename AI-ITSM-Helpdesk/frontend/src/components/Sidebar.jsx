@@ -6,38 +6,62 @@ import {
   AssistantIcon,
   KnowledgeIcon,
   ServiceNowIcon,
-  AnalyticsIcon,
-  SettingsIcon,
+  MoonIcon,
+  SunIcon,
   CloseIcon
 } from './Icons';
 
 export default function Sidebar({
   activeTab,
   setActiveTab,
-  onAssistantTabClick,
-  isAssistantOpen,
+  openTicketCount = 0,
+  theme,
+  onToggleTheme,
   mobileOpen,
   onCloseMobile
 }) {
-  const mainNav = [
-    { id: 'dashboard', label: 'Dashboard', icon: <DashboardIcon /> },
-    { id: 'tickets', label: 'Ticket Management', icon: <TicketsIcon /> },
-    { id: 'assistant', label: 'AI Helpdesk Assistant', icon: <AssistantIcon />, badge: 'Copilot' },
-    { id: 'knowledge', label: 'Knowledge Base', icon: <KnowledgeIcon /> },
-    { id: 'servicenow', label: 'ServiceNow Hub', icon: <ServiceNowIcon /> }
+  const selfServiceNav = [
+    {
+      id: 'dashboard',
+      label: 'Helpdesk Home',
+      icon: <DashboardIcon size={18} />,
+      desc: 'Portal & Quick Actions'
+    },
+    {
+      id: 'assistant',
+      label: 'AI Copilot Assistant',
+      icon: <AssistantIcon size={18} />,
+      badge: 'Live AI',
+      badgeClass: 'badge-live-ai',
+      desc: 'Instant Troubleshooting'
+    },
+    {
+      id: 'tickets',
+      label: 'My Tickets & Requests',
+      icon: <TicketsIcon size={18} />,
+      badge: openTicketCount > 0 ? `${openTicketCount}` : null,
+      badgeClass: 'badge-ticket-count',
+      desc: 'Active & Historical'
+    },
+    {
+      id: 'knowledge',
+      label: 'Knowledge Runbooks',
+      icon: <KnowledgeIcon size={18} />,
+      desc: 'Self-Service Guides'
+    }
   ];
 
-  const managementNav = [
-    { id: 'analytics', label: 'Analytics', icon: <AnalyticsIcon /> },
-    { id: 'settings', label: 'Settings', icon: <SettingsIcon /> }
+  const integrationNav = [
+    {
+      id: 'servicenow',
+      label: 'ServiceNow Sync',
+      icon: <ServiceNowIcon size={18} />,
+      badge: 'Sync',
+      desc: 'Enterprise Bridge'
+    }
   ];
 
   const handleNavClick = (id) => {
-    if (id === 'assistant' && onAssistantTabClick) {
-      onAssistantTabClick();
-      if (onCloseMobile) onCloseMobile();
-      return;
-    }
     setActiveTab(id);
     if (onCloseMobile) onCloseMobile();
   };
@@ -57,10 +81,10 @@ export default function Sidebar({
         {/* Top Brand Header */}
         <div className="sidebar-brand-header">
           <div className="sidebar-brand-left">
-            <BrandLogo size={34} />
+            <BrandLogo size={36} />
             <div className="sidebar-brand-text">
               <span className="brand-name">AI-ITSM</span>
-              <span className="brand-subtitle">Intelligent Helpdesk</span>
+              <span className="brand-subtitle">Smart Employee Helpdesk</span>
             </div>
           </div>
           {mobileOpen && (
@@ -76,36 +100,11 @@ export default function Sidebar({
 
         {/* Scrollable Navigation Area */}
         <div className="sidebar-nav-container">
-          {/* MAIN SECTION */}
+          {/* SELF-SERVICE PORTAL */}
           <div className="sidebar-nav-group">
-            <div className="sidebar-group-title">MAIN</div>
+            <div className="sidebar-group-title">SELF-SERVICE PORTAL</div>
             <nav className="sidebar-menu">
-              {mainNav.map((item) => {
-                const isActive = item.id === 'assistant' ? isAssistantOpen : activeTab === item.id;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    className={`sidebar-nav-item ${isActive ? 'active' : ''}`}
-                    onClick={() => handleNavClick(item.id)}
-                    aria-current={isActive ? 'page' : undefined}
-                  >
-                    <span className="sidebar-nav-icon">{item.icon}</span>
-                    <span className="sidebar-nav-label">{item.label}</span>
-                    {item.badge && (
-                      <span className="sidebar-nav-pill">{item.badge}</span>
-                    )}
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
-
-          {/* MANAGEMENT SECTION */}
-          <div className="sidebar-nav-group">
-            <div className="sidebar-group-title">MANAGEMENT</div>
-            <nav className="sidebar-menu">
-              {managementNav.map((item) => {
+              {selfServiceNav.map((item) => {
                 const isActive = activeTab === item.id;
                 return (
                   <button
@@ -116,11 +115,72 @@ export default function Sidebar({
                     aria-current={isActive ? 'page' : undefined}
                   >
                     <span className="sidebar-nav-icon">{item.icon}</span>
-                    <span className="sidebar-nav-label">{item.label}</span>
+                    <div className="sidebar-nav-text-block">
+                      <span className="sidebar-nav-label">{item.label}</span>
+                      <span className="sidebar-nav-sublabel">{item.desc}</span>
+                    </div>
+                    {item.badge && (
+                      <span className={`sidebar-nav-pill ${item.badgeClass || ''}`}>
+                        {item.badge}
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </nav>
+          </div>
+
+          {/* ENTERPRISE BRIDGE */}
+          <div className="sidebar-nav-group">
+            <div className="sidebar-group-title">INTEGRATIONS</div>
+            <nav className="sidebar-menu">
+              {integrationNav.map((item) => {
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={`sidebar-nav-item ${isActive ? 'active' : ''}`}
+                    onClick={() => handleNavClick(item.id)}
+                    aria-current={isActive ? 'page' : undefined}
+                  >
+                    <span className="sidebar-nav-icon">{item.icon}</span>
+                    <div className="sidebar-nav-text-block">
+                      <span className="sidebar-nav-label">{item.label}</span>
+                      <span className="sidebar-nav-sublabel">{item.desc}</span>
+                    </div>
+                    {item.badge && (
+                      <span className="sidebar-nav-pill sidebar-nav-pill-muted">
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        </div>
+
+        {/* User Profile & Theme Switcher in Sidebar Footer */}
+        <div className="sidebar-user-footer">
+          <div className="user-profile-card">
+            <div className="user-avatar-wrap">
+              <div className="user-avatar-initials">SB</div>
+              <span className="user-status-dot" title="Active on network" />
+            </div>
+            <div className="user-meta">
+              <span className="user-name">Shivani B.</span>
+              <span className="user-role">Self-Service Portal</span>
+            </div>
+            <button
+              type="button"
+              className="sidebar-theme-toggle-btn"
+              onClick={onToggleTheme}
+              title={`Switch to ${theme === 'dark' ? 'Light' : 'Dark'} mode`}
+              aria-label="Toggle visual theme"
+            >
+              {theme === 'dark' ? <SunIcon size={16} /> : <MoonIcon size={16} />}
+            </button>
           </div>
         </div>
       </aside>

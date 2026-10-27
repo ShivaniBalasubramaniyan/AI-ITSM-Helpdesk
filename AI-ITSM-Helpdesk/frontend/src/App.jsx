@@ -9,8 +9,6 @@ import AIAssistant from './components/AIAssistant';
 import AIHelpdeskChatPanel from './components/AIHelpdeskChatPanel';
 import KnowledgeBase from './components/KnowledgeBase';
 import ServiceNowHub from './components/ServiceNowHub';
-import Analytics from './components/Analytics';
-import Settings from './components/Settings';
 import { api } from './api';
 
 export default function App() {
@@ -25,7 +23,7 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
-  const [isRobotJumping, setIsRobotJumping] = useState(false);
+  const [assistantInitialQuery, setAssistantInitialQuery] = useState('');
 
   const [theme, setTheme] = useState(() => {
     try {
@@ -130,27 +128,29 @@ export default function App() {
     setActiveTab('knowledge');
   };
 
-  const handleToggleAssistant = () => {
-    setIsAssistantOpen((prev) => !prev);
+  const handleAskCopilotWithPrompt = (prompt) => {
+    setAssistantInitialQuery(prompt);
+    setActiveTab('assistant');
   };
 
-  const handleAssistantNavClick = () => {
-    // Smooth jump/bounce animation (600ms), then automatically open the assistant
-    setIsRobotJumping(true);
-    setTimeout(() => {
-      setIsAssistantOpen(true);
-      setIsRobotJumping(false);
-    }, 600);
+  const [createInitialData, setCreateInitialData] = useState(null);
+
+  const handleOpenCreate = (initialData = null) => {
+    setCreateInitialData(initialData);
+    setIsCreateOpen(true);
   };
+
+  const openTicketsCount = (tickets || []).filter(
+    (t) => t.status !== 'Resolved' && t.status !== 'Closed'
+  ).length;
 
   return (
     <div className="enterprise-layout-root" data-theme={theme}>
-      {/* Permanent Desktop / Collapsible Mobile Left Sidebar */}
+      {/* User-Centric Left Sidebar */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        onAssistantTabClick={handleAssistantNavClick}
-        isAssistantOpen={isAssistantOpen}
+        openTicketCount={openTicketsCount}
         theme={theme}
         onToggleTheme={toggleTheme}
         mobileOpen={mobileSidebarOpen}
@@ -162,14 +162,14 @@ export default function App() {
         {/* Top Header */}
         <Header
           activeTab={activeTab}
-          onOpenCreate={() => setIsCreateOpen(true)}
+          onNavigateTab={(tab) => setActiveTab(tab)}
+          onOpenCreate={() => handleOpenCreate()}
           theme={theme}
           onToggleTheme={toggleTheme}
           onToggleMobileMenu={() => setMobileSidebarOpen((prev) => !prev)}
-          onGlobalSearch={(query) => {
-            setFilters((f) => ({ ...f, search: query }));
-            setActiveTab('tickets');
-          }}
+          tickets={tickets}
+          onSelectTicket={(t) => setSelectedTicket(t)}
+          backendHealth={backendHealth}
         />
 
         {/* Dynamic Page Views */}
@@ -179,8 +179,23 @@ export default function App() {
               stats={stats}
               tickets={tickets}
               onSelectTicket={(t) => setSelectedTicket(t)}
-              onOpenCreate={() => setIsCreateOpen(true)}
+              onOpenCreate={handleOpenCreate}
               onNavigateTab={(tab) => setActiveTab(tab)}
+              onOpenKBArticle={handleOpenKBArticle}
+              onAskCopilotWithPrompt={handleAskCopilotWithPrompt}
+              addToast={addToast}
+              onRefreshStats={loadDashboardStats}
+            />
+          )}
+
+          {activeTab === 'assistant' && (
+            <AIAssistant
+              initialPrompt={assistantInitialQuery}
+              onTicketCreated={handleTicketCreated}
+              onOpenKBArticle={handleOpenKBArticle}
+              onNavigateTab={(tab) => setActiveTab(tab)}
+              onSelectTicket={(t) => setSelectedTicket(t)}
+              addToast={addToast}
             />
           )}
 
@@ -190,16 +205,10 @@ export default function App() {
               filters={filters}
               setFilters={setFilters}
               onSelectTicket={(t) => setSelectedTicket(t)}
-              onOpenCreate={() => setIsCreateOpen(true)}
-              loading={loadingTickets}
-            />
-          )}
-
-          {activeTab === 'assistant' && (
-            <AIAssistant
-              onTicketCreated={handleTicketCreated}
-              onOpenKBArticle={handleOpenKBArticle}
+              onOpenCreate={() => handleOpenCreate()}
+              onTicketsChanged={loadTickets}
               addToast={addToast}
+              loading={loadingTickets}
             />
           )}
 
@@ -217,18 +226,10 @@ export default function App() {
               onRefreshTickets={loadTickets}
             />
           )}
-
-          {activeTab === 'analytics' && (
-            <Analytics stats={stats} />
-          )}
-
-          {activeTab === 'settings' && (
-            <Settings addToast={addToast} />
-          )}
         </main>
       </div>
 
-      {/* Ticket Details Modal */}
+      {/* Global Modals */}
       {selectedTicket && (
         <TicketDetailModal
           ticket={selectedTicket}
@@ -239,49 +240,50 @@ export default function App() {
         />
       )}
 
-      {/* Create Ticket Modal */}
       {isCreateOpen && (
         <CreateTicketModal
-          onClose={() => setIsCreateOpen(false)}
+          initialData={createInitialData}
+          onClose={() => {
+            setIsCreateOpen(false);
+            setCreateInitialData(null);
+          }}
           onTicketCreated={handleTicketCreated}
           addToast={addToast}
         />
       )}
 
-      {/* Floating AI Helpdesk Assistant Robot Button at bottom-right */}
+      {/* Floating AI Copilot Quick Drawer Button & Panel (Optional Quick-Access) */}
       <button
-        type="button"
         id="floating-ai-assistant-btn"
-        className={`floating-ai-assistant-btn ${isRobotJumping ? 'jumping' : ''} ${isAssistantOpen ? 'panel-open' : ''}`}
-        onClick={handleToggleAssistant}
-        aria-label={isAssistantOpen ? "Close AI Helpdesk Assistant" : "Open AI Helpdesk Assistant"}
-        title={isAssistantOpen ? "Close AI Helpdesk Assistant" : "Open AI Helpdesk Assistant"}
+        className="floating-ai-assistant-btn"
+        onClick={() => setIsAssistantOpen((prev) => !prev)}
+        title="Quick AI Helpdesk Assistant"
+        aria-label="Open Floating AI Helpdesk Assistant"
       >
         <img
           src="/robot_assistant.png"
-          alt="AI Helpdesk Assistant"
-          className="floating-ai-robot-img"
+          alt="AI Robot"
+          className="floating-robot-img"
         />
-        <span className="floating-ai-status-dot" title="AI Helpdesk Assistant Active" />
+        <span className="floating-robot-ping" />
       </button>
 
-      {/* Floating AI Helpdesk Assistant Chat Panel (Kept mounted to preserve conversation & solutions) */}
-      <AIHelpdeskChatPanel
-        isOpen={isAssistantOpen}
-        onClose={() => setIsAssistantOpen(false)}
-        onTicketCreated={handleTicketCreated}
-        onOpenKBArticle={handleOpenKBArticle}
-        addToast={addToast}
-      />
+      {isAssistantOpen && (
+        <AIHelpdeskChatPanel
+          isOpen={isAssistantOpen}
+          onClose={() => setIsAssistantOpen(false)}
+          onTicketCreated={handleTicketCreated}
+          onOpenKBArticle={handleOpenKBArticle}
+          addToast={addToast}
+        />
+      )}
 
-      {/* Global Toast Notification Stack */}
+      {/* Toast Notification Container */}
       <div className="toast-container" aria-live="polite">
-        {toasts.map((t) => (
-          <div key={t.id} className="toast">
-            <span className="toast-icon">
-              {t.type === 'success' ? '✔' : t.type === 'error' ? '✖' : 'ℹ'}
-            </span>
-            <span className="toast-message">{t.message}</span>
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`toast-pill toast-${toast.type}`}>
+            <span className="toast-dot" />
+            <span className="toast-msg">{toast.message}</span>
           </div>
         ))}
       </div>

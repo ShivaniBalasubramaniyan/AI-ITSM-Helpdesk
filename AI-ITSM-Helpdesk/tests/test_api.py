@@ -48,7 +48,7 @@ except ImportError:
         def delete(self, path):
             return self._req("DELETE", path)
 
-BASE_URL = os.getenv("ITSM_API_URL", "http://127.0.0.1:8000")
+BASE_URL = os.getenv("ITSM_API_URL", "http://127.0.0.1:8001")
 
 class ClientHelper:
     def __init__(self, base_url=BASE_URL):
@@ -239,6 +239,152 @@ class TestAIITSMPlatform(unittest.TestCase):
             # Confirm 404
             get_res = self.client.get(f"/api/tickets/{ticket_id}")
             self.assertEqual(get_res.status_code, 404)
+
+    def test_13_bulk_operations(self):
+        """Verify bulk update and status changes across multiple tickets."""
+        response = self.client.post("/api/tickets/bulk", json={
+            "ticket_ids": ["INC-1001", "INC-1002"],
+            "action": "priority",
+            "priority": "High"
+        })
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["status"], "success")
+        self.assertEqual(data["action"], "priority")
+        self.assertGreaterEqual(data["affected_count"], 1)
+
+    def test_14_csv_export(self):
+        """Verify CSV export of tickets dataset."""
+        response = self.client.get("/api/tickets/export/csv")
+        self.assertEqual(response.status_code, 200)
+        lines = response.text.splitlines()
+        self.assertGreaterEqual(len(lines), 2)
+        self.assertIn("Ticket ID", lines[0])
+
+    def test_15_ai_diagnosis(self):
+        """Verify AI root cause diagnosis and runbook matching."""
+        response = self.client.get("/api/tickets/INC-1001/ai-diagnosis")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["ticket_id"], "INC-1001")
+        self.assertIn("root_cause", data)
+        self.assertIn("blast_radius", data)
+        self.assertIn("prevention_recommendation", data)
+        self.assertIsInstance(data["checklist"], list)
+        self.assertGreaterEqual(len(data["checklist"]), 1)
+        self.assertTrue(data["can_auto_resolve"])
+
+    def test_16_ai_auto_resolve(self):
+        """Verify 1-click auto-resolve updates ticket to Resolved with resolution notes and audit log."""
+        # Create a temporary ticket to auto-resolve
+        create_res = self.client.post("/api/tickets", json={
+            "title": "Thunderbolt 4 dual monitor flickering",
+            "description": "External monitors flicker and disconnect every 5 minutes when docked.",
+            "requester": "Auto-Resolve Test Engineer",
+            "department": "Engineering"
+        })
+        self.assertEqual(create_res.status_code, 201)
+        ticket_id = create_res.json()["id"]
+
+        resolve_res = self.client.post(f"/api/tickets/{ticket_id}/ai-resolve", json={
+            "resolution_notes": "Discharged dock power capacitors and upgraded DisplayLink driver via Runbook KB006.",
+            "actor": "AI Autonomous Resolver (Test)"
+        })
+        self.assertEqual(resolve_res.status_code, 200)
+        resolved_data = resolve_res.json()
+        self.assertEqual(resolved_data["status"], "Resolved")
+        self.assertIn("Runbook KB006", resolved_data["resolution_notes"])
+        self.assertIsNotNone(resolved_data["resolved_at"])
+
+        # Clean up
+        self.client.delete(f"/api/tickets/{ticket_id}")
+
+    def test_17_add_and_list_ticket_comments(self):
+        """Verify adding internal work notes and public comments to tickets."""
+        # 1. Add internal work note
+        post_res = self.client.post("/api/tickets/INC-1001/comments", json={
+            "body": "Executed test ping on US-East VPN tunnel gateway. Latency 14ms.",
+            "author": "Elena Rostova",
+            "author_role": "Network Operations",
+            "is_internal": True
+        })
+        self.assertEqual(post_res.status_code, 201)
+        cmt = post_res.json()
+        self.assertEqual(cmt["ticket_id"], "INC-1001")
+        self.assertEqual(cmt["author"], "Elena Rostova")
+        self.assertTrue(cmt["is_internal"])
+        self.assertIn("US-East VPN", cmt["body"])
+
+        # 2. Add public comment
+        pub_res = self.client.post("/api/tickets/INC-1001/comments", json={
+            "body": "User contacted and asked to restart Cisco AnyConnect client.",
+            "author": "Elena Rostova",
+            "author_role": "Desktop Support",
+            "is_internal": False
+        })
+        self.assertEqual(pub_res.status_code, 201)
+        self.assertFalse(pub_res.json()["is_internal"])
+
+        # 3. Retrieve all comments
+        get_res = self.client.get("/api/tickets/INC-1001/comments")
+        self.assertEqual(get_res.status_code, 200)
+        comments = get_res.json()
+        self.assertGreaterEqual(len(comments), 2)
+        bodies = [c["body"] for c in comments]
+        self.assertTrue(any("US-East VPN" in b for b in bodies))
+
+    def test_18_database_status_and_sync(self):
+        """Verify database status telemetry and MongoDB Atlas sync endpoint."""
+        # 1. Database status
+        status_res = self.client.get("/api/database/status")
+        self.assertEqual(status_res.status_code, 200)
+        status_data = status_res.json()
+        self.assertTrue(status_data.get("connected"))
+        self.assertIn(status_data.get("type"), ["mongodb_atlas", "sqlite"])
+        self.assertGreaterEqual(status_data.get("ticket_count", 0), 1)
+
+        # 2. Sync to MongoDB
+        sync_res = self.client.post("/api/database/sync-to-mongodb")
+        self.assertEqual(sync_res.status_code, 200)
+        sync_data = sync_res.json()
+        self.assertTrue(sync_data.get("success"))
+
+        # 3. Dashboard stats
+        stats_res = self.client.get("/api/dashboard/stats")
+        self.assertEqual(stats_res.status_code, 200)
+        stats = stats_res.json()
+        self.assertGreaterEqual(stats.get("total_tickets", 0), 1)
+        self.assertIn("category_distribution", stats)
+        self.assertIn("sla_breakdown", stats)
+
+    def test_19_create_knowledge_runbook(self):
+        """Verify authoring and indexing a new IT SOP runbook."""
+        payload = {
+            "title": "PostgreSQL Replica Lag & Connection Saturation",
+            "category": "Database & Cloud",
+            "tags": ["postgresql", "replica-lag", "rds", "connections"],
+            "summary": "Standard operating procedure for investigating write-ahead log (WAL) sender latency and pooling exhaustion.",
+            "content": "## Symptoms\n- Read replicas lag behind primary by > 60 seconds\n- Max connection errors (error 53300)\n\n## Resolution\n1. Check pg_stat_replication\n2. Kill idle connections in transaction\n3. Restart pgbouncer pooler",
+            "author": "Database Reliability Engineering"
+        }
+        res = self.client.post("/api/knowledge", json=payload)
+        self.assertEqual(res.status_code, 201)
+        data = res.json()
+        self.assertTrue(data["id"].startswith("KB"))
+        self.assertEqual(data["title"], payload["title"])
+        self.assertEqual(data["category"], payload["category"])
+        self.assertIn("postgresql", data["tags"])
+
+        # Fetch detail
+        detail_res = self.client.get(f"/api/knowledge/{data['id']}")
+        self.assertEqual(detail_res.status_code, 200)
+        self.assertIn("pg_stat_replication", detail_res.json()["content"])
+
+        # Search index
+        search_res = self.client.get("/api/knowledge", params={"search": "postgresql"})
+        self.assertEqual(search_res.status_code, 200)
+        search_ids = [item["id"] for item in search_res.json()]
+        self.assertIn(data["id"], search_ids)
 
 if __name__ == "__main__":
     unittest.main()

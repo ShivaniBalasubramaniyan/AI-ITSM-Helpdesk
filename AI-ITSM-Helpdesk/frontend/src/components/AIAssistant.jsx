@@ -11,15 +11,23 @@ import {
   ShieldIcon,
   CheckIcon,
   RefreshIcon,
-  PlusIcon
+  PlusIcon,
+  MicIcon
 } from './Icons';
 
-export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast }) {
+export default function AIAssistant({
+  initialPrompt = '',
+  onTicketCreated,
+  onOpenKBArticle,
+  onNavigateTab,
+  onSelectTicket,
+  addToast
+}) {
   const [messages, setMessages] = useState([
     {
       id: 'welcome',
       role: 'assistant',
-      content: 'Good morning. I am your ITSM Copilot, connected to the enterprise knowledge base and incident automation engine. How can I assist you today?',
+      content: 'Hello! I am your AI Helpdesk Copilot. I have access to verified IT knowledge runbooks and can diagnose issues, recommend step-by-step solutions, or automatically create and route support tickets for you.',
       suggested_kb_articles: [],
       troubleshooting_steps: [],
       suggested_ticket: null,
@@ -29,8 +37,63 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [creatingTicket, setCreatingTicket] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
   const messagesEndRef = useRef(null);
+  const hasProcessedInitial = useRef(false);
+  const recognitionRef = useRef(null);
+
+  const toggleVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      if (addToast) addToast('Voice recognition is not supported on this browser (use Chrome or Edge).', 'warning');
+      return;
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+      setIsListening(false);
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        if (addToast) addToast('🎙️ Listening... Speak your IT issue clearly', 'info');
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
+        setIsListening(false);
+        if (addToast) addToast(`Transcribed: "${transcript}"`, 'success');
+      };
+
+      recognition.onerror = (event) => {
+        setIsListening(false);
+        if (event.error !== 'no-speech' && addToast) {
+          addToast(`Voice error: ${event.error}`, 'warning');
+        }
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      console.error('Speech recognition exception:', err);
+      setIsListening(false);
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -40,15 +103,22 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
     scrollToBottom();
   }, [messages, loading]);
 
+  useEffect(() => {
+    if (initialPrompt && !hasProcessedInitial.current) {
+      hasProcessedInitial.current = true;
+      handleSend(initialPrompt);
+    }
+  }, [initialPrompt]);
+
   const quickActionCards = [
     {
-      title: 'Reset Password',
+      title: 'Reset Password & MFA',
       desc: 'Okta, Active Directory & SSO account unlock',
       icon: <LockIcon size={20} />,
       prompt: 'I am locked out of my corporate Okta account and need a password reset'
     },
     {
-      title: 'VPN Connection',
+      title: 'VPN Connection Issues',
       desc: 'Cisco AnyConnect & gateway timeout diagnostics',
       icon: <WifiIcon size={20} />,
       prompt: 'My Cisco AnyConnect VPN fails to authenticate and times out'
@@ -70,7 +140,8 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
   const suggestedQuestions = [
     'How do I request a JetBrains PyCharm IDE commercial license?',
     'Wi-Fi keeps disconnecting in Building 3 conference room',
-    'How do I setup MFA on a new company iPhone?'
+    'How do I setup MFA on a new company iPhone?',
+    'Zoom meeting audio microphone echo issue'
   ];
 
   const handleSend = async (textToSend) => {
@@ -107,14 +178,14 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
         {
           id: (Date.now() + 1).toString(),
           role: 'assistant',
-          content: 'I encountered an error accessing the IT diagnostic engine. Would you like me to open a support ticket for our engineering desk directly?',
+          content: 'I encountered an error querying the diagnostic runbook index. However, I can still draft and submit an incident ticket for you immediately:',
           suggested_kb_articles: [],
           troubleshooting_steps: [],
           suggested_ticket: {
             title: text.slice(0, 60),
             description: text,
-            requester: 'Current User',
-            department: 'IT User',
+            requester: 'Shivani B.',
+            department: 'Self-Service User',
             category: 'Software',
             priority: 'Medium',
             urgency: 'Medium',
@@ -133,16 +204,23 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
     if (!ticketData || creatingTicket) return;
     try {
       setCreatingTicket(true);
-      const created = await api.createTicket(ticketData);
+      const rawTitle = (ticketData.title || '').trim();
+      const rawDesc = (ticketData.description || '').trim();
+      const payload = {
+        ...ticketData,
+        title: rawTitle.length >= 3 ? rawTitle : `IT Support: ${rawTitle || 'General Incident'}`,
+        description: rawDesc.length >= 5 ? rawDesc : `${rawDesc || rawTitle || 'Assistance requested'} (Logged via AI Copilot)`
+      };
+      const created = await api.createTicket(payload);
       if (onTicketCreated) onTicketCreated(created);
-      if (addToast) addToast(`Incident ${created.id} created automatically!`, 'success');
+      if (addToast) addToast(`Incident ${created.id} logged in ITSM!`, 'success');
 
       setMessages((prev) => [
         ...prev,
         {
           id: Date.now().toString(),
           role: 'assistant',
-          content: `Incident **${created.id}** has been registered in the ITSM database. It has been routed to the **${created.assigned_team}** team with **${created.priority}** priority. Target SLA resolution is **${created.sla_target_hours} hours**.`,
+          content: `Incident **${created.id}** has been successfully registered in the ITSM system. It has been routed to the **${created.assigned_team}** team with **${created.priority}** priority. Your target resolution SLA is **${created.sla_target_hours || 4} hours**.`,
           suggested_kb_articles: [],
           troubleshooting_steps: [],
           suggested_ticket: null,
@@ -162,7 +240,7 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
       {
         id: 'welcome',
         role: 'assistant',
-        content: 'Session refreshed. How else can I assist with your IT infrastructure or access requests today?',
+        content: 'Session refreshed. How else can I assist with your IT services, devices, or access today?',
         suggested_kb_articles: [],
         troubleshooting_steps: [],
         suggested_ticket: null,
@@ -177,17 +255,17 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
       <div className="copilot-top-bar">
         <div className="copilot-identity">
           <div className="copilot-avatar-badge">
-            <AssistantIcon size={20} />
+            <AssistantIcon size={22} />
           </div>
           <div>
             <div className="copilot-title-row">
-              <span className="copilot-name">ITSM Copilot</span>
+              <span className="copilot-name">ITSM AI Copilot</span>
               <span className="copilot-status-chip">
-                <span className="copilot-status-dot" /> Enterprise RAG Connected
+                <span className="copilot-status-dot" /> RAG Runbooks Connected
               </span>
             </div>
             <span className="copilot-desc">
-              Autonomous diagnostic agent indexing approved IT standard operating runbooks
+              Autonomous diagnostic agent with 1-click incident escalation & approved IT runbook resolution
             </span>
           </div>
         </div>
@@ -203,37 +281,48 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
         </button>
       </div>
 
-      {/* Quick Action Diagnostic Cards (visible when thread is fresh) */}
-      {messages.length <= 1 && (
-        <div className="copilot-hero-section">
-          <div className="copilot-hero-heading">
-            <h2>Good morning. How can I help resolve your IT issue?</h2>
-            <p>Select a common diagnostic workflow or describe any problem in the input below.</p>
-          </div>
-
-          <div className="quick-actions-grid">
-            {quickActionCards.map((card, idx) => (
-              <button
-                key={idx}
-                type="button"
-                className="quick-action-card"
-                onClick={() => handleSend(card.prompt)}
-                disabled={loading}
-              >
-                <div className="quick-action-icon">{card.icon}</div>
-                <div className="quick-action-content">
-                  <div className="quick-action-title">{card.title}</div>
-                  <div className="quick-action-desc">{card.desc}</div>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Conversational Stream */}
+      {/* Main Messages Scrollport */}
       <div className="copilot-chat-container">
-        <div className="copilot-messages-area">
+        {/* Quick Launch Cards (shown when only welcome message is present) */}
+        {messages.length === 1 && (
+          <div className="copilot-quick-start">
+            <div className="quick-start-title">Common IT Diagnostics:</div>
+            <div className="quick-cards-grid">
+              {quickActionCards.map((card, idx) => (
+                <div
+                  key={idx}
+                  className="quick-card-item"
+                  onClick={() => handleSend(card.prompt)}
+                  role="button"
+                  tabIndex={0}
+                >
+                  <div className="quick-card-icon">{card.icon}</div>
+                  <div className="quick-card-body">
+                    <span className="quick-card-heading">{card.title}</span>
+                    <span className="quick-card-desc">{card.desc}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="suggested-questions-row">
+              <span className="suggested-q-label">Or ask about:</span>
+              {suggestedQuestions.map((q, idx) => (
+                <button
+                  key={idx}
+                  type="button"
+                  className="suggested-pill"
+                  onClick={() => handleSend(q)}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Message Thread */}
+        <div className="copilot-messages-thread">
           {messages.map((m) => {
             const isUser = m.role === 'user';
             return (
@@ -243,7 +332,7 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
               >
                 {!isUser && (
                   <div className="assistant-msg-avatar">
-                    <AssistantIcon size={16} />
+                    <AssistantIcon size={18} />
                   </div>
                 )}
 
@@ -264,7 +353,7 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
                         <span className="card-section-icon" aria-hidden="true">
                           <CheckIcon size={14} />
                         </span>
-                        <span>Recommended Remediation Steps:</span>
+                        <span>Recommended Self-Service Steps:</span>
                       </div>
                       <ol className="troubleshoot-list">
                         {m.troubleshooting_steps.map((step, idx) => {
@@ -305,26 +394,57 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
 
                   {/* Suggested Ticket Escalation Card */}
                   {m.suggested_ticket && (
-                    <div className="ticket-escalation-card">
+                    <div className="ticket-escalation-card glass-card">
                       <div className="escalation-header">
                         <span className="escalation-title">
-                          I couldn't resolve this automatically. Would you like me to create a support ticket?
+                          ⚡ Automated Ticket Proposal
                         </span>
+                        <span className="badge badge-high">{m.suggested_ticket.priority} Priority</span>
                       </div>
                       <p className="escalation-meta">
-                        Pre-classified as <strong>{m.suggested_ticket.category}</strong> with <strong>{m.suggested_ticket.priority}</strong> priority for the <strong>{m.suggested_ticket.assigned_team || 'IT Service Desk'}</strong>.
+                        I have prepared a support ticket classified as <strong>{m.suggested_ticket.category}</strong> for the <strong>{m.suggested_ticket.assigned_team || 'IT Service Desk'}</strong> team.
                       </p>
+                      <div className="escalation-details-grid">
+                        <div className="escalation-detail-item">
+                          <span className="esc-label">Subject:</span>
+                          <span className="esc-val">{m.suggested_ticket.title}</span>
+                        </div>
+                        <div className="escalation-detail-item">
+                          <span className="esc-label">Target SLA:</span>
+                          <span className="esc-val">{m.suggested_ticket.priority === 'Critical' ? '2 Hours' : m.suggested_ticket.priority === 'High' ? '4 Hours' : '8 Hours'}</span>
+                        </div>
+                      </div>
                       <button
                         type="button"
-                        className="btn btn-primary btn-sm escalation-btn"
+                        className="btn btn-primary escalation-btn"
                         onClick={() => handleCreateTicketFromSuggestion(m.suggested_ticket)}
                         disabled={creatingTicket}
                       >
-                        <span className="escalation-btn-icon" aria-hidden="true">
-                          <PlusIcon size={14} />
-                        </span>
-                        <span>{creatingTicket ? 'Submitting Incident...' : 'Create Support Ticket'}</span>
+                        <PlusIcon size={14} />
+                        <span>{creatingTicket ? 'Submitting to ITSM...' : 'Confirm & Submit Ticket'}</span>
                       </button>
+                    </div>
+                  )}
+
+                  {/* Successfully Created Ticket Action Banner */}
+                  {m.ticketCreatedInfo && (
+                    <div className="ticket-success-card">
+                      <div className="ticket-success-header">
+                        <span className="ticket-success-check">✓ Registered Incident</span>
+                        <span className="ticket-id-tag">{m.ticketCreatedInfo.id}</span>
+                      </div>
+                      <div className="ticket-success-actions">
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          onClick={() => {
+                            if (onSelectTicket) onSelectTicket(m.ticketCreatedInfo);
+                            if (onNavigateTab) onNavigateTab('tickets');
+                          }}
+                        >
+                          View in My Tickets →
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -335,67 +455,68 @@ export default function AIAssistant({ onTicketCreated, onOpenKBArticle, addToast
           {loading && (
             <div className="copilot-message-row assistant-row">
               <div className="assistant-msg-avatar">
-                <AssistantIcon size={16} />
+                <AssistantIcon size={18} />
               </div>
               <div className="copilot-bubble assistant-bubble loading-bubble">
-                <div className="typing-indicator">
-                  <span className="typing-dot" />
-                  <span className="typing-dot" />
-                  <span className="typing-dot" />
-                </div>
-                <span className="typing-text">Querying enterprise RAG knowledge base & synthesizing diagnosis...</span>
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span className="typing-dot" />
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginLeft: 8 }}>
+                  Querying IT runbook index & analyzing classification...
+                </span>
               </div>
             </div>
           )}
 
           <div ref={messagesEndRef} />
         </div>
+      </div>
 
-        {/* Input Dock */}
-        <div className="copilot-input-dock">
-          {/* Quick suggestions pills */}
-          <div className="copilot-quick-pills">
-            {suggestedQuestions.map((q, idx) => (
-              <button
-                key={idx}
-                type="button"
-                className="copilot-pill"
-                onClick={() => handleSend(q)}
-                disabled={loading}
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-
-          <div className="copilot-input-bar">
-            <input
-              type="text"
-              className="copilot-text-input"
-              placeholder="Describe your IT issue, error code, or request (e.g. VPN timeout, Okta lockout)..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-              disabled={loading}
-            />
-            <button
-              type="button"
-              className="copilot-send-btn"
-              onClick={() => handleSend()}
-              disabled={loading || !input.trim()}
-              aria-label="Send message"
-            >
-              <SendIcon size={16} />
-            </button>
-          </div>
-          <div className="copilot-input-hint">
-            <span>Press <strong>Enter ↵</strong> to send. ITSM Copilot references verified company IT runbooks.</span>
-          </div>
+      {/* Chat Input Bar */}
+      <div className="copilot-input-area">
+        <form
+          className="copilot-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSend();
+          }}
+        >
+          <input
+            type="text"
+            className="copilot-input"
+            placeholder="Type your issue or question... (e.g., 'Cisco VPN connection timed out' or 'Create ticket for broken monitor')"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            disabled={loading}
+          />
+          <button
+            type="button"
+            className="btn btn-secondary copilot-voice-btn"
+            onClick={toggleVoiceInput}
+            disabled={loading}
+            style={{
+              background: isListening ? '#ef4444' : undefined,
+              color: isListening ? '#ffffff' : undefined,
+              borderColor: isListening ? '#ef4444' : undefined,
+              boxShadow: isListening ? '0 0 12px rgba(239, 68, 68, 0.5)' : undefined
+            }}
+            title={isListening ? "Listening... Click to stop" : "Speak via Microphone (Voice Dictation)"}
+          >
+            <MicIcon size={16} />
+            <span>{isListening ? 'Listening...' : 'Voice'}</span>
+          </button>
+          <button
+            type="submit"
+            className="btn btn-primary copilot-send-btn"
+            disabled={loading || !input.trim()}
+            title="Send Message"
+          >
+            <SendIcon size={16} />
+            <span>Send</span>
+          </button>
+        </form>
+        <div className="copilot-footer-meta">
+          <span>AI ITSM Copilot v1.0 • Connected to 8 verified runbooks • Bi-directional ServiceNow Sync Ready</span>
         </div>
       </div>
     </div>

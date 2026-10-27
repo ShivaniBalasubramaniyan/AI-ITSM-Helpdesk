@@ -2,15 +2,15 @@ import React, { useState } from 'react';
 import { api } from '../api';
 import { BrandLogo, AssistantIcon, CloseIcon, PlusIcon } from './Icons';
 
-export default function CreateTicketModal({ onClose, onTicketCreated, addToast }) {
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [requester, setRequester] = useState('Alex Morgan');
-  const [department, setDepartment] = useState('Engineering');
-  const [category, setCategory] = useState('Software');
-  const [priority, setPriority] = useState('Medium');
-  const [urgency, setUrgency] = useState('Medium');
-  const [assignedTeam, setAssignedTeam] = useState('IT Service Desk');
+export default function CreateTicketModal({ onClose, onTicketCreated, addToast, initialData = null }) {
+  const [title, setTitle] = useState(initialData?.title || '');
+  const [description, setDescription] = useState(initialData?.description || '');
+  const [requester, setRequester] = useState(initialData?.requester || 'Shivani B.');
+  const [department, setDepartment] = useState(initialData?.department || 'Engineering');
+  const [category, setCategory] = useState(initialData?.category || 'Software');
+  const [priority, setPriority] = useState(initialData?.priority || 'Medium');
+  const [urgency, setUrgency] = useState(initialData?.urgency || 'Medium');
+  const [assignedTeam, setAssignedTeam] = useState(initialData?.assigned_team || 'IT Service Desk');
 
   const [aiClassification, setAiClassification] = useState(null);
   const [classifying, setClassifying] = useState(false);

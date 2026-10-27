@@ -6,11 +6,12 @@ Integrates user feedback scores and powers RAG retrieval for the AI Assistant.
 
 import os
 import re
+from datetime import datetime, timezone
 from typing import List, Dict, Optional, Any
 try:
-    from backend.database import get_kb_feedback_stats, record_kb_feedback
+    from backend.database import get_kb_feedback_stats, record_kb_feedback, save_knowledge_article_cloud
 except (ImportError, ValueError):
-    from database import get_kb_feedback_stats, record_kb_feedback  # type: ignore
+    from database import get_kb_feedback_stats, record_kb_feedback, save_knowledge_article_cloud  # type: ignore
 
 KB_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "knowledge_base"))
 
@@ -194,5 +195,69 @@ class KBService:
 
         scored.sort(key=lambda x: x[0], reverse=True)
         return [item[1] for item in scored[:top_k]]
+
+    def create_article(
+        self,
+        title: str,
+        category: str,
+        content: str,
+        tags: Optional[List[str]] = None,
+        summary: Optional[str] = None,
+        author: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Creates and indexes a new IT Standard Operating Procedure (SOP) Runbook."""
+        self.reload_articles()
+
+        # 1. Determine next KB id (e.g. KB009, KB010)
+        existing_nums = []
+        for k in self._cache.keys():
+            m = re.match(r"^KB(\d+)$", k, re.IGNORECASE)
+            if m:
+                existing_nums.append(int(m.group(1)))
+
+        next_num = max(existing_nums) + 1 if existing_nums else 1
+        art_id = f"KB{next_num:03d}"
+
+        # 2. Slug and filepath
+        clean_title = (title or "IT SOP Runbook").strip()
+        slug = re.sub(r"[^a-z0-9]+", "_", clean_title.lower()).strip("_")[:40] or "runbook"
+        filename = f"{art_id}_{slug}.md"
+        filepath = os.path.join(self.kb_dir, filename)
+
+        # 3. Clean tags and metadata
+        clean_tags = [t.strip().lower() for t in (tags or []) if t.strip()]
+        if not clean_tags:
+            clean_tags = [w.lower() for w in re.findall(r"\w+", clean_title) if len(w) > 3]
+        tags_str = ", ".join(clean_tags)
+
+        now_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        author_str = author.strip() if author else "IT Knowledge Engineering"
+
+        # 4. Construct formatted markdown
+        raw_content = f"# {clean_title}\n"
+        raw_content += f"- **Article ID**: {art_id}\n"
+        raw_content += f"- **Category**: {category.strip() or 'General'}\n"
+        raw_content += f"- **Tags**: {tags_str}\n"
+        raw_content += f"- **Author**: {author_str}\n"
+        raw_content += f"- **Created**: {now_date}\n"
+        raw_content += f"- **Updated**: {now_date}\n\n"
+        raw_content += content.strip() + "\n"
+
+        # 5. Persist to file
+        os.makedirs(self.kb_dir, exist_ok=True)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(raw_content)
+
+        # 6. Reload and parse
+        self.reload_articles()
+        article = self.get_article(art_id)
+
+        # 7. Cloud sync if MongoDB Atlas is active
+        try:
+            save_knowledge_article_cloud(article)
+        except Exception:
+            pass
+
+        return article
 
 kb_service = KBService()

@@ -19,9 +19,19 @@ async function request(endpoint, options = {}) {
       try {
         const errorData = await res.json();
         if (errorData.detail) {
-          errorMsg = typeof errorData.detail === 'string' 
-            ? errorData.detail 
-            : JSON.stringify(errorData.detail);
+          if (Array.isArray(errorData.detail)) {
+            errorMsg = errorData.detail
+              .map((e) => {
+                const field = Array.isArray(e.loc) ? e.loc[e.loc.length - 1] : 'Field';
+                const fieldName = field ? field.charAt(0).toUpperCase() + field.slice(1) : 'Field';
+                return `${fieldName}: ${e.msg}`;
+              })
+              .join(' • ');
+          } else if (typeof errorData.detail === 'string') {
+            errorMsg = errorData.detail;
+          } else {
+            errorMsg = JSON.stringify(errorData.detail);
+          }
         }
       } catch (e) {
         // use default errorMsg
@@ -38,6 +48,8 @@ async function request(endpoint, options = {}) {
 export const api = {
   getHealth: () => request('/api/health'),
   getDashboardStats: () => request('/api/dashboard/stats'),
+  getDatabaseStatus: () => request('/api/database/status'),
+  syncToMongoDB: () => request('/api/database/sync-to-mongodb', { method: 'POST' }),
   
   getTickets: (filters = {}) => {
     const query = new URLSearchParams();
@@ -72,6 +84,20 @@ export const api = {
     body: JSON.stringify({ status, actor, resolution_notes: resolutionNotes })
   }),
 
+  getTicketDiagnosis: (id) => request(`/api/tickets/${id}/ai-diagnosis`),
+
+  autoResolveTicket: (id, resolutionNotes = '', actor = 'AI Autonomous Resolver (Copilot)') => request(`/api/tickets/${id}/ai-resolve`, {
+    method: 'POST',
+    body: JSON.stringify({ resolution_notes: resolutionNotes, actor })
+  }),
+
+  getTicketComments: (id) => request(`/api/tickets/${id}/comments`),
+
+  addTicketComment: (id, payload) => request(`/api/tickets/${id}/comments`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+
   classifyTicket: (title, description) => request('/api/ai/classify', {
     method: 'POST',
     body: JSON.stringify({ title, description })
@@ -97,6 +123,11 @@ export const api = {
     body: JSON.stringify({ helpful })
   }),
 
+  createKnowledgeArticle: (payload) => request('/api/knowledge', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+
   getServiceNowIncidents: () => request('/api/servicenow/incidents'),
 
   syncTicketToServiceNow: (ticketId) => request(`/api/servicenow/sync/${ticketId}`, {
@@ -105,5 +136,20 @@ export const api = {
 
   syncAllToServiceNow: () => request('/api/servicenow/sync-all', {
     method: 'POST'
-  })
+  }),
+
+  bulkTicketAction: (payload) => request('/api/tickets/bulk', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+
+  exportTicketsCSV: (filters = {}) => {
+    const query = new URLSearchParams();
+    if (filters.search) query.append('search', filters.search);
+    if (filters.status && filters.status !== 'All') query.append('status', filters.status);
+    if (filters.priority && filters.priority !== 'All') query.append('priority', filters.priority);
+    if (filters.category && filters.category !== 'All') query.append('category', filters.category);
+    const qs = query.toString();
+    window.open(`${BASE_URL}/api/tickets/export/csv${qs ? `?${qs}` : ''}`, '_blank');
+  }
 };

@@ -1,6 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../api';
 import { BrandLogo, AssistantIcon, CloseIcon, PlusIcon } from './Icons';
+
+const STANDARD_TEAMS = [
+  'IT Service Desk',
+  'Network Operations',
+  'Desktop Support',
+  'Identity & Access',
+  'Cloud Infrastructure',
+  'IT Asset Management',
+  'Security Operations'
+];
 
 export default function CreateTicketModal({ onClose, onTicketCreated, addToast, initialData = null }) {
   const [title, setTitle] = useState(initialData?.title || '');
@@ -10,11 +20,27 @@ export default function CreateTicketModal({ onClose, onTicketCreated, addToast, 
   const [category, setCategory] = useState(initialData?.category || 'Software');
   const [priority, setPriority] = useState(initialData?.priority || 'Medium');
   const [urgency, setUrgency] = useState(initialData?.urgency || 'Medium');
+  const [impact, setImpact] = useState(initialData?.impact || 'Medium');
   const [assignedTeam, setAssignedTeam] = useState(initialData?.assigned_team || 'IT Service Desk');
 
-  const [aiClassification, setAiClassification] = useState(null);
+  const [aiClassification, setAiClassification] = useState(initialData?.ai_classification || null);
   const [classifying, setClassifying] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (initialData) {
+      if (initialData.title !== undefined) setTitle(initialData.title);
+      if (initialData.description !== undefined) setDescription(initialData.description);
+      if (initialData.requester !== undefined) setRequester(initialData.requester);
+      if (initialData.department !== undefined) setDepartment(initialData.department);
+      if (initialData.category !== undefined) setCategory(initialData.category);
+      if (initialData.priority !== undefined) setPriority(initialData.priority);
+      if (initialData.urgency !== undefined) setUrgency(initialData.urgency);
+      if (initialData.impact !== undefined) setImpact(initialData.impact);
+      if (initialData.assigned_team !== undefined) setAssignedTeam(initialData.assigned_team);
+      if (initialData.ai_classification !== undefined) setAiClassification(initialData.ai_classification);
+    }
+  }, [initialData]);
 
   const handleAIClassify = async () => {
     if (!title.trim() && !description.trim()) {
@@ -29,10 +55,11 @@ export default function CreateTicketModal({ onClose, onTicketCreated, addToast, 
         description || title
       );
       setAiClassification(result);
-      setCategory(result.category);
-      setPriority(result.priority);
-      setUrgency(result.urgency);
-      setAssignedTeam(result.suggested_team);
+      if (result.category) setCategory(result.category);
+      if (result.priority) setPriority(result.priority);
+      if (result.urgency) setUrgency(result.urgency);
+      if (result.impact) setImpact(result.impact);
+      if (result.suggested_team) setAssignedTeam(result.suggested_team);
       if (addToast) addToast(`AI Auto-Classified: ${result.category} (${result.priority})`, 'success');
     } catch (err) {
       if (addToast) addToast(`Classification error: ${err.message}`, 'error');
@@ -43,7 +70,10 @@ export default function CreateTicketModal({ onClose, onTicketCreated, addToast, 
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!title.trim() || !description.trim()) {
+    const cleanTitle = title.trim();
+    const cleanDesc = description.trim();
+
+    if (!cleanTitle || !cleanDesc) {
       if (addToast) addToast('Please fill in both title and description.', 'error');
       return;
     }
@@ -51,21 +81,21 @@ export default function CreateTicketModal({ onClose, onTicketCreated, addToast, 
     try {
       setSubmitting(true);
       const payload = {
-        title,
-        description,
-        requester,
-        department,
+        title: cleanTitle,
+        description: cleanDesc,
+        requester: requester.trim() || 'Shivani B.',
+        department: department || 'Engineering',
         category,
         priority,
         urgency,
-        impact: urgency,
-        assigned_team: assignedTeam,
+        impact: impact || urgency,
+        assigned_team: assignedTeam || 'IT Service Desk',
         ai_classification: aiClassification
       };
 
       const created = await api.createTicket(payload);
-      if (addToast) addToast(`Incident ${created.id} logged successfully!`, 'success');
-      onTicketCreated(created);
+      if (addToast) addToast(`Incident ${created.id} created successfully!`, 'success');
+      if (onTicketCreated) onTicketCreated(created, { openDetails: true });
       onClose();
     } catch (err) {
       if (addToast) addToast(`Failed to create ticket: ${err.message}`, 'error');
@@ -73,6 +103,11 @@ export default function CreateTicketModal({ onClose, onTicketCreated, addToast, 
       setSubmitting(false);
     }
   };
+
+  // Ensure current assignedTeam is included in options even if custom
+  const teamOptions = STANDARD_TEAMS.includes(assignedTeam)
+    ? STANDARD_TEAMS
+    : [assignedTeam, ...STANDARD_TEAMS].filter(Boolean);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -96,6 +131,7 @@ export default function CreateTicketModal({ onClose, onTicketCreated, addToast, 
             <input
               type="text"
               className="form-input"
+              maxLength={200}
               placeholder="e.g. Cisco AnyConnect VPN Certificate Expired on macOS"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
@@ -142,14 +178,14 @@ export default function CreateTicketModal({ onClose, onTicketCreated, addToast, 
                   padding: '2px 8px',
                   borderRadius: 12
                 }}>
-                  {Math.round(aiClassification.confidence * 100)}% Confidence
+                  {Math.round((aiClassification.confidence || 0.9) * 100)}% Confidence
                 </span>
               </div>
               <p style={{ fontSize: '0.825rem', color: 'var(--text-main)', lineHeight: 1.5, marginBottom: 8 }}>
                 {aiClassification.reasoning}
               </p>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                Target Team: <strong style={{ color: 'var(--text-main)' }}>{aiClassification.suggested_team}</strong> • Suggested Priority: <strong style={{ color: 'var(--text-main)' }}>{aiClassification.priority}</strong>
+                Target Team: <strong style={{ color: 'var(--text-main)' }}>{aiClassification.suggested_team || assignedTeam}</strong> • Suggested Priority: <strong style={{ color: 'var(--text-main)' }}>{aiClassification.priority || priority}</strong>
               </div>
             </div>
           )}
@@ -184,8 +220,8 @@ export default function CreateTicketModal({ onClose, onTicketCreated, addToast, 
             </div>
           </div>
 
-          {/* Category, Priority, Urgency Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+          {/* Category, Priority, Urgency, Impact Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 14 }}>
             <div className="form-group">
               <label className="form-label">IT Category</label>
               <select
@@ -221,11 +257,27 @@ export default function CreateTicketModal({ onClose, onTicketCreated, addToast, 
               <select
                 className="form-select"
                 value={urgency}
-                onChange={(e) => setUrgency(e.target.value)}
+                onChange={(e) => {
+                  setUrgency(e.target.value);
+                  if (!impact || impact === urgency) setImpact(e.target.value);
+                }}
               >
-                <option value="High">High Urgency</option>
-                <option value="Medium">Medium Urgency</option>
-                <option value="Low">Low Urgency</option>
+                <option value="High">High</option>
+                <option value="Medium">Medium</option>
+                <option value="Low">Low</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Impact</label>
+              <select
+                className="form-select"
+                value={impact}
+                onChange={(e) => setImpact(e.target.value)}
+              >
+                <option value="High">High (Enterprise / Dept)</option>
+                <option value="Medium">Medium (Workgroup)</option>
+                <option value="Low">Low (Individual)</option>
               </select>
             </div>
           </div>
@@ -233,12 +285,15 @@ export default function CreateTicketModal({ onClose, onTicketCreated, addToast, 
           {/* Routing Target Team */}
           <div className="form-group">
             <label className="form-label">Assignment Group / Team</label>
-            <input
-              type="text"
-              className="form-input"
+            <select
+              className="form-select"
               value={assignedTeam}
               onChange={(e) => setAssignedTeam(e.target.value)}
-            />
+            >
+              {teamOptions.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
           </div>
 
           {/* Form Actions */}

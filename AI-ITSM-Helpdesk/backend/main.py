@@ -187,6 +187,7 @@ def list_tickets(
 @app.post("/api/tickets", response_model=TicketResponse, status_code=201)
 def create_ticket(payload: TicketCreate):
     data = payload.model_dump()
+    provided_fields = payload.model_fields_set
     
     # If AI classification not provided by user, run auto-classifier
     if not data.get("ai_classification"):
@@ -195,14 +196,14 @@ def create_ticket(payload: TicketCreate):
             description=data.get("description", "")
         )
         data["ai_classification"] = ai_res
-        if not payload.category or payload.category == "Software":
+        if "category" not in provided_fields or not data.get("category"):
             data["category"] = ai_res["category"]
-        if not payload.priority or payload.priority == "Medium":
+        if "priority" not in provided_fields or not data.get("priority"):
             data["priority"] = ai_res["priority"]
-            data["urgency"] = ai_res["urgency"]
-            data["impact"] = ai_res["impact"]
-        if not payload.assigned_team or payload.assigned_team == "IT Service Desk":
-            data["assigned_team"] = ai_res["suggested_team"]
+            data["urgency"] = ai_res.get("urgency", "Medium")
+            data["impact"] = ai_res.get("impact", "Medium")
+        if "assigned_team" not in provided_fields or not data.get("assigned_team"):
+            data["assigned_team"] = ai_res.get("suggested_team", "IT Service Desk")
 
     created = db_create_ticket(data)
     return created

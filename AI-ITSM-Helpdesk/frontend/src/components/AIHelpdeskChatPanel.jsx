@@ -228,7 +228,7 @@ export default function AIHelpdeskChatPanel({
         description: rawDesc.length >= 5 ? rawDesc : `${rawDesc || rawTitle || 'Assistance requested'} (Logged via AI Copilot)`
       };
       const created = await api.createTicket(payload);
-      if (onTicketCreated) onTicketCreated(created);
+      if (onTicketCreated) onTicketCreated(created, { openDetails: false });
       if (addToast) addToast(`Incident ${created.id} created!`, 'success');
 
       setMessages((prev) => [

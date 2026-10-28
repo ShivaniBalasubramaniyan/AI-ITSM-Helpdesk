@@ -105,9 +105,25 @@ export default function App() {
     }
   };
 
-  const handleTicketCreated = (newTicket) => {
-    setTickets((prev) => [newTicket, ...prev]);
+  const handleTicketCreated = (newTicket, options = { openDetails: true }) => {
+    setFilters({
+      status: '',
+      priority: '',
+      category: '',
+      assignee: '',
+      sla: '',
+      search: ''
+    });
+    setTickets((prev) => {
+      const filtered = prev.filter((t) => t.id !== newTicket.id);
+      return [newTicket, ...filtered];
+    });
+    loadTickets();
     loadDashboardStats();
+    setActiveTab('tickets');
+    if (options?.openDetails) {
+      setSelectedTicket(newTicket);
+    }
   };
 
   const handleTicketUpdated = (updatedTicket) => {

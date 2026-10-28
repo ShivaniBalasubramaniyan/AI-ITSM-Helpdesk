@@ -979,11 +979,14 @@ def create_ticket(data: Dict[str, Any]) -> Dict[str, Any]:
 
     if is_mongo_active():
         try:
-            cnt = _mongo_db.tickets.count_documents({})
-            ticket_id = f"INC-{1001 + cnt}"
-            if _mongo_db.tickets.find_one({"id": ticket_id}):
-                import random
-                ticket_id = f"INC-{random.randint(2000, 9999)}"
+            highest = 1000
+            for doc in _mongo_db.tickets.find({}, {"id": 1}):
+                tid = str(doc.get("id") or "")
+                if tid.startswith("INC-") and tid[4:].isdigit():
+                    val = int(tid[4:])
+                    if val > highest:
+                        highest = val
+            ticket_id = f"INC-{highest + 1}"
 
             doc = {
                 "id": ticket_id,
@@ -1024,14 +1027,16 @@ def create_ticket(data: Dict[str, Any]) -> Dict[str, Any]:
     # SQLite
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) as cnt FROM tickets")
-    cnt = cursor.fetchone()["cnt"]
-    ticket_id = f"INC-{1001 + cnt}"
-
-    cursor.execute("SELECT id FROM tickets WHERE id = ?", (ticket_id,))
-    if cursor.fetchone():
-        import random
-        ticket_id = f"INC-{random.randint(2000, 9999)}"
+    cursor.execute("SELECT id FROM tickets")
+    rows = cursor.fetchall()
+    highest = 1000
+    for r in rows:
+        tid = str(r["id"] or "")
+        if tid.startswith("INC-") and tid[4:].isdigit():
+            val = int(tid[4:])
+            if val > highest:
+                highest = val
+    ticket_id = f"INC-{highest + 1}"
 
     ai_json = json.dumps(ai_data) if ai_data else None
 

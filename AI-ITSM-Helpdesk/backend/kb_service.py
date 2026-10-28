@@ -88,7 +88,11 @@ class KBService:
 
     def list_articles(self, category: Optional[str] = None, search: Optional[str] = None) -> List[Dict[str, Any]]:
         self.reload_articles()
-        stats = get_kb_feedback_stats()
+        try:
+            stats = get_kb_feedback_stats()
+        except Exception as e:
+            print(f"[KBService] Feedback lookup error ({e}), defaulting to zero counts.")
+            stats = {}
         results = []
 
         for art in self._cache.values():
@@ -137,7 +141,11 @@ class KBService:
         if not art:
             return None
 
-        stats = get_kb_feedback_stats()
+        try:
+            stats = get_kb_feedback_stats()
+        except Exception as e:
+            print(f"[KBService] Feedback lookup error ({e}), defaulting to zero counts.")
+            stats = {}
         fb = stats.get(art["id"], {"helpful": 0, "not_helpful": 0})
 
         # Find related articles (same category or common tags)

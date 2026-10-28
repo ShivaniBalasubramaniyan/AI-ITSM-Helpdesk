@@ -32,8 +32,14 @@ _mongo_client: Optional[Any] = None
 _mongo_db: Optional[Any] = None
 _mongo_active: bool = False
 
+def mark_mongo_inactive(reason: str = ""):
+    global _mongo_active
+    if _mongo_active:
+        print(f"[Database] MongoDB Cloud unavailable ({reason}). Seamlessly switching to local SQLite database.")
+    _mongo_active = False
+
 def is_mongo_active() -> bool:
-    return _mongo_active and _mongo_db is not None
+    return bool(_mongo_active and _mongo_db is not None)
 
 def get_active_db_type() -> str:
     return "mongodb_atlas" if is_mongo_active() else "sqlite"
@@ -71,11 +77,8 @@ def get_db_status() -> Dict[str, Any]:
                 "kb_count": kb_count
             }
         except Exception as e:
-            return {
-                "type": "mongodb_atlas",
-                "connected": False,
-                "error": str(e)
-            }
+            mark_mongo_inactive(str(e))
+            # Fall through to SQLite stats below
     conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) as cnt FROM tickets")
@@ -694,7 +697,7 @@ def init_db():
 def sync_sqlite_to_mongodb() -> Dict[str, Any]:
     """Transfers all existing SQLite tickets, history, and feedback to MongoDB Cloud Atlas."""
     if not is_mongo_active():
-        return {"status": "error", "message": "MongoDB Cloud Atlas is not connected"}
+        return {"status": "offline", "success": False, "message": "MongoDB Cloud Atlas is not currently connected (running in local SQLite mode)"}
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -772,42 +775,45 @@ def get_all_tickets(
     offset: int = 0
 ) -> List[Dict[str, Any]]:
     if is_mongo_active():
-        filter_q: Dict[str, Any] = {}
-        if search:
-            regex = {"$regex": search, "$options": "i"}
-            filter_q["$or"] = [
-                {"title": regex},
-                {"description": regex},
-                {"requester": regex},
-                {"id": regex}
-            ]
-        if status and status.lower() != "all":
-            filter_q["status"] = status
-        if priority and priority.lower() != "all":
-            filter_q["priority"] = priority
-        if category and category.lower() != "all":
-            filter_q["category"] = category
+        try:
+            filter_q: Dict[str, Any] = {}
+            if search:
+                regex = {"$regex": search, "$options": "i"}
+                filter_q["$or"] = [
+                    {"title": regex},
+                    {"description": regex},
+                    {"requester": regex},
+                    {"id": regex}
+                ]
+            if status and status.lower() != "all":
+                filter_q["status"] = status
+            if priority and priority.lower() != "all":
+                filter_q["priority"] = priority
+            if category and category.lower() != "all":
+                filter_q["category"] = category
 
-        cursor = _mongo_db.tickets.find(filter_q, {"_id": 0}).sort("created_at", DESCENDING).skip(offset).limit(limit)
-        tickets = []
-        for doc in cursor:
-            ticket = dict(doc)
-            if isinstance(ticket.get("ai_classification"), str):
-                try:
-                    ticket["ai_classification"] = json.loads(ticket["ai_classification"])
-                except Exception:
-                    pass
-            sla = compute_sla_info(
-                priority=ticket["priority"],
-                created_at_iso=ticket["created_at"],
-                resolved_at_iso=ticket.get("resolved_at"),
-                status=ticket["status"]
-            )
-            ticket["sla_status"] = sla["sla_status"]
-            ticket["sla_remaining_seconds"] = sla["remaining_seconds"]
-            ticket["sla_remaining_hours"] = sla["remaining_hours"]
-            tickets.append(ticket)
-        return tickets
+            cursor = _mongo_db.tickets.find(filter_q, {"_id": 0}).sort("created_at", DESCENDING).skip(offset).limit(limit)
+            tickets = []
+            for doc in cursor:
+                ticket = dict(doc)
+                if isinstance(ticket.get("ai_classification"), str):
+                    try:
+                        ticket["ai_classification"] = json.loads(ticket["ai_classification"])
+                    except Exception:
+                        pass
+                sla = compute_sla_info(
+                    priority=ticket["priority"],
+                    created_at_iso=ticket["created_at"],
+                    resolved_at_iso=ticket.get("resolved_at"),
+                    status=ticket["status"]
+                )
+                ticket["sla_status"] = sla["sla_status"]
+                ticket["sla_remaining_seconds"] = sla["remaining_seconds"]
+                ticket["sla_remaining_hours"] = sla["remaining_hours"]
+                tickets.append(ticket)
+            return tickets
+        except Exception as e:
+            mark_mongo_inactive(str(e))
 
     # SQLite Fallback
     conn = get_db_connection()
@@ -862,25 +868,28 @@ def get_all_tickets(
 
 def get_ticket_by_id(ticket_id: str) -> Optional[Dict[str, Any]]:
     if is_mongo_active():
-        doc = _mongo_db.tickets.find_one({"id": ticket_id}, {"_id": 0})
-        if not doc:
-            return None
-        ticket = dict(doc)
-        if isinstance(ticket.get("ai_classification"), str):
-            try:
-                ticket["ai_classification"] = json.loads(ticket["ai_classification"])
-            except Exception:
-                pass
-        sla = compute_sla_info(
-            priority=ticket["priority"],
-            created_at_iso=ticket["created_at"],
-            resolved_at_iso=ticket.get("resolved_at"),
-            status=ticket["status"]
-        )
-        ticket["sla_status"] = sla["sla_status"]
-        ticket["sla_remaining_seconds"] = sla["remaining_seconds"]
-        ticket["sla_remaining_hours"] = sla["remaining_hours"]
-        return ticket
+        try:
+            doc = _mongo_db.tickets.find_one({"id": ticket_id}, {"_id": 0})
+            if not doc:
+                return None
+            ticket = dict(doc)
+            if isinstance(ticket.get("ai_classification"), str):
+                try:
+                    ticket["ai_classification"] = json.loads(ticket["ai_classification"])
+                except Exception:
+                    pass
+            sla = compute_sla_info(
+                priority=ticket["priority"],
+                created_at_iso=ticket["created_at"],
+                resolved_at_iso=ticket.get("resolved_at"),
+                status=ticket["status"]
+            )
+            ticket["sla_status"] = sla["sla_status"]
+            ticket["sla_remaining_seconds"] = sla["remaining_seconds"]
+            ticket["sla_remaining_hours"] = sla["remaining_hours"]
+            return ticket
+        except Exception as e:
+            mark_mongo_inactive(str(e))
 
     # SQLite Fallback
     conn = get_db_connection()
@@ -913,8 +922,11 @@ def get_ticket_by_id(ticket_id: str) -> Optional[Dict[str, Any]]:
 
 def get_ticket_history(ticket_id: str) -> List[Dict[str, Any]]:
     if is_mongo_active():
-        cursor = _mongo_db.ticket_history.find({"ticket_id": ticket_id}, {"_id": 0}).sort("timestamp", ASCENDING)
-        return list(cursor)
+        try:
+            cursor = _mongo_db.ticket_history.find({"ticket_id": ticket_id}, {"_id": 0}).sort("timestamp", ASCENDING)
+            return list(cursor)
+        except Exception as e:
+            mark_mongo_inactive(str(e))
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -929,16 +941,19 @@ def get_ticket_history(ticket_id: str) -> List[Dict[str, Any]]:
 def record_history(ticket_id: str, action: str, actor: str, details: str = ""):
     now_iso = datetime.now(timezone.utc).isoformat()
     if is_mongo_active():
-        cnt = _mongo_db.ticket_history.count_documents({}) + 1
-        _mongo_db.ticket_history.insert_one({
-            "id": cnt,
-            "ticket_id": ticket_id,
-            "timestamp": now_iso,
-            "action": action,
-            "actor": actor,
-            "details": details
-        })
-        return
+        try:
+            cnt = _mongo_db.ticket_history.count_documents({}) + 1
+            _mongo_db.ticket_history.insert_one({
+                "id": cnt,
+                "ticket_id": ticket_id,
+                "timestamp": now_iso,
+                "action": action,
+                "actor": actor,
+                "details": details
+            })
+            return
+        except Exception as e:
+            mark_mongo_inactive(str(e))
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -963,45 +978,48 @@ def create_ticket(data: Dict[str, Any]) -> Dict[str, Any]:
     ai_data = data.get("ai_classification")
 
     if is_mongo_active():
-        cnt = _mongo_db.tickets.count_documents({})
-        ticket_id = f"INC-{1001 + cnt}"
-        if _mongo_db.tickets.find_one({"id": ticket_id}):
-            import random
-            ticket_id = f"INC-{random.randint(2000, 9999)}"
+        try:
+            cnt = _mongo_db.tickets.count_documents({})
+            ticket_id = f"INC-{1001 + cnt}"
+            if _mongo_db.tickets.find_one({"id": ticket_id}):
+                import random
+                ticket_id = f"INC-{random.randint(2000, 9999)}"
 
-        doc = {
-            "id": ticket_id,
-            "title": data.get("title", "Untitled Ticket"),
-            "description": data.get("description", ""),
-            "requester": data.get("requester", "Standard Employee"),
-            "department": data.get("department", "General"),
-            "category": data.get("category", "Software"),
-            "priority": priority,
-            "urgency": data.get("urgency", "Medium"),
-            "impact": data.get("impact", "Medium"),
-            "status": status,
-            "assigned_agent": data.get("assigned_agent", "Unassigned"),
-            "assigned_team": data.get("assigned_team", "IT Service Desk"),
-            "created_at": now_iso,
-            "updated_at": now_iso,
-            "resolved_at": None,
-            "sla_target_hours": sla["sla_target_hours"],
-            "sla_due_at": sla["sla_due_at"],
-            "sla_status": sla["sla_status"],
-            "ai_classification": ai_data,
-            "servicenow_sys_id": data.get("servicenow_sys_id"),
-            "servicenow_number": data.get("servicenow_number"),
-            "resolution_notes": data.get("resolution_notes", "")
-        }
-        _mongo_db.tickets.insert_one(doc)
+            doc = {
+                "id": ticket_id,
+                "title": data.get("title", "Untitled Ticket"),
+                "description": data.get("description", ""),
+                "requester": data.get("requester", "Standard Employee"),
+                "department": data.get("department", "General"),
+                "category": data.get("category", "Software"),
+                "priority": priority,
+                "urgency": data.get("urgency", "Medium"),
+                "impact": data.get("impact", "Medium"),
+                "status": status,
+                "assigned_agent": data.get("assigned_agent", "Unassigned"),
+                "assigned_team": data.get("assigned_team", "IT Service Desk"),
+                "created_at": now_iso,
+                "updated_at": now_iso,
+                "resolved_at": None,
+                "sla_target_hours": sla["sla_target_hours"],
+                "sla_due_at": sla["sla_due_at"],
+                "sla_status": sla["sla_status"],
+                "ai_classification": ai_data,
+                "servicenow_sys_id": data.get("servicenow_sys_id"),
+                "servicenow_number": data.get("servicenow_number"),
+                "resolution_notes": data.get("resolution_notes", "")
+            }
+            _mongo_db.tickets.insert_one(doc)
 
-        record_history(
-            ticket_id=ticket_id,
-            action="Ticket Created",
-            actor=data.get("requester", "Portal User"),
-            details=f"Ticket registered in category '{data.get('category')}' with priority '{priority}'."
-        )
-        return get_ticket_by_id(ticket_id)
+            record_history(
+                ticket_id=ticket_id,
+                action="Ticket Created",
+                actor=data.get("requester", "Portal User"),
+                details=f"Ticket registered in category '{data.get('category')}' with priority '{priority}'."
+            )
+            return get_ticket_by_id(ticket_id)
+        except Exception as e:
+            mark_mongo_inactive(str(e))
 
     # SQLite
     conn = get_db_connection()
@@ -1090,47 +1108,50 @@ def update_ticket(ticket_id: str, updates: Dict[str, Any], actor: str = "IT Staf
     )
 
     if is_mongo_active():
-        set_fields: Dict[str, Any] = {
-            "title": updates.get("title", existing["title"]),
-            "description": updates.get("description", existing["description"]),
-            "requester": updates.get("requester", existing["requester"]),
-            "department": updates.get("department", existing["department"]),
-            "category": updates.get("category", existing["category"]),
-            "priority": priority,
-            "urgency": updates.get("urgency", existing["urgency"]),
-            "impact": updates.get("impact", existing["impact"]),
-            "status": new_status,
-            "assigned_agent": updates.get("assigned_agent", existing["assigned_agent"]),
-            "assigned_team": updates.get("assigned_team", existing["assigned_team"]),
-            "updated_at": now_iso,
-            "resolved_at": resolved_at,
-            "sla_target_hours": sla["sla_target_hours"],
-            "sla_due_at": sla["sla_due_at"],
-            "sla_status": sla["sla_status"],
-            "servicenow_sys_id": updates.get("servicenow_sys_id", existing.get("servicenow_sys_id")),
-            "servicenow_number": updates.get("servicenow_number", existing.get("servicenow_number")),
-            "resolution_notes": updates.get("resolution_notes", existing.get("resolution_notes", ""))
-        }
-        if "ai_classification" in updates:
-            set_fields["ai_classification"] = updates["ai_classification"]
+        try:
+            set_fields: Dict[str, Any] = {
+                "title": updates.get("title", existing["title"]),
+                "description": updates.get("description", existing["description"]),
+                "requester": updates.get("requester", existing["requester"]),
+                "department": updates.get("department", existing["department"]),
+                "category": updates.get("category", existing["category"]),
+                "priority": priority,
+                "urgency": updates.get("urgency", existing["urgency"]),
+                "impact": updates.get("impact", existing["impact"]),
+                "status": new_status,
+                "assigned_agent": updates.get("assigned_agent", existing["assigned_agent"]),
+                "assigned_team": updates.get("assigned_team", existing["assigned_team"]),
+                "updated_at": now_iso,
+                "resolved_at": resolved_at,
+                "sla_target_hours": sla["sla_target_hours"],
+                "sla_due_at": sla["sla_due_at"],
+                "sla_status": sla["sla_status"],
+                "servicenow_sys_id": updates.get("servicenow_sys_id", existing.get("servicenow_sys_id")),
+                "servicenow_number": updates.get("servicenow_number", existing.get("servicenow_number")),
+                "resolution_notes": updates.get("resolution_notes", existing.get("resolution_notes", ""))
+            }
+            if "ai_classification" in updates:
+                set_fields["ai_classification"] = updates["ai_classification"]
 
-        _mongo_db.tickets.update_one({"id": ticket_id}, {"$set": set_fields})
+            _mongo_db.tickets.update_one({"id": ticket_id}, {"$set": set_fields})
 
-        if status_changed:
-            record_history(
-                ticket_id=ticket_id,
-                action=f"Status Changed: {old_status} -> {new_status}",
-                actor=actor,
-                details=updates.get("resolution_notes", f"Status transitioned to {new_status}.")
-            )
-        else:
-            record_history(
-                ticket_id=ticket_id,
-                action="Ticket Updated",
-                actor=actor,
-                details="Field updates committed."
-            )
-        return get_ticket_by_id(ticket_id)
+            if status_changed:
+                record_history(
+                    ticket_id=ticket_id,
+                    action=f"Status Changed: {old_status} -> {new_status}",
+                    actor=actor,
+                    details=updates.get("resolution_notes", f"Status transitioned to {new_status}.")
+                )
+            else:
+                record_history(
+                    ticket_id=ticket_id,
+                    action="Ticket Updated",
+                    actor=actor,
+                    details="Field updates committed."
+                )
+            return get_ticket_by_id(ticket_id)
+        except Exception as e:
+            mark_mongo_inactive(str(e))
 
     # SQLite
     conn = get_db_connection()
@@ -1207,11 +1228,14 @@ def update_ticket(ticket_id: str, updates: Dict[str, Any], actor: str = "IT Staf
 
 def delete_ticket(ticket_id: str) -> bool:
     if is_mongo_active():
-        res = _mongo_db.tickets.delete_one({"id": ticket_id})
-        deleted = res.deleted_count > 0
-        if deleted:
-            _mongo_db.ticket_history.delete_many({"ticket_id": ticket_id})
-        return deleted
+        try:
+            res = _mongo_db.tickets.delete_one({"id": ticket_id})
+            deleted = res.deleted_count > 0
+            if deleted:
+                _mongo_db.ticket_history.delete_many({"ticket_id": ticket_id})
+            return deleted
+        except Exception as e:
+            mark_mongo_inactive(str(e))
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1225,70 +1249,73 @@ def delete_ticket(ticket_id: str) -> bool:
 
 def get_dashboard_statistics() -> Dict[str, Any]:
     if is_mongo_active():
-        docs = list(_mongo_db.tickets.find({}, {"_id": 0}))
-        total_tickets = len(docs)
-        open_tickets = 0
-        in_progress_tickets = 0
-        resolved_tickets = 0
-        closed_tickets = 0
-        critical_tickets = 0
-        high_tickets = 0
+        try:
+            docs = list(_mongo_db.tickets.find({}, {"_id": 0}))
+            total_tickets = len(docs)
+            open_tickets = 0
+            in_progress_tickets = 0
+            resolved_tickets = 0
+            closed_tickets = 0
+            critical_tickets = 0
+            high_tickets = 0
 
-        category_counts: Dict[str, int] = {}
-        priority_counts: Dict[str, int] = {}
-        sla_counts: Dict[str, int] = {"Healthy": 0, "At Risk": 0, "Breached": 0, "Met": 0}
+            category_counts: Dict[str, int] = {}
+            priority_counts: Dict[str, int] = {}
+            sla_counts: Dict[str, int] = {"Healthy": 0, "At Risk": 0, "Breached": 0, "Met": 0}
 
-        for t in docs:
-            status = t["status"]
-            priority = t["priority"]
-            cat = t["category"]
+            for t in docs:
+                status = t["status"]
+                priority = t["priority"]
+                cat = t["category"]
 
-            if status in ["New", "Open"]:
-                open_tickets += 1
-            elif status == "In Progress":
-                in_progress_tickets += 1
-            elif status == "Resolved":
-                resolved_tickets += 1
-            elif status == "Closed":
-                closed_tickets += 1
+                if status in ["New", "Open"]:
+                    open_tickets += 1
+                elif status == "In Progress":
+                    in_progress_tickets += 1
+                elif status == "Resolved":
+                    resolved_tickets += 1
+                elif status == "Closed":
+                    closed_tickets += 1
 
-            if priority == "Critical":
-                critical_tickets += 1
-            elif priority == "High":
-                high_tickets += 1
+                if priority == "Critical":
+                    critical_tickets += 1
+                elif priority == "High":
+                    high_tickets += 1
 
-            category_counts[cat] = category_counts.get(cat, 0) + 1
-            priority_counts[priority] = priority_counts.get(priority, 0) + 1
+                category_counts[cat] = category_counts.get(cat, 0) + 1
+                priority_counts[priority] = priority_counts.get(priority, 0) + 1
 
-            sla = compute_sla_info(
-                priority=priority,
-                created_at_iso=t["created_at"],
-                resolved_at_iso=t.get("resolved_at"),
-                status=status
-            )
-            s_status = sla["sla_status"]
-            if s_status in sla_counts:
-                sla_counts[s_status] += 1
+                sla = compute_sla_info(
+                    priority=priority,
+                    created_at_iso=t["created_at"],
+                    resolved_at_iso=t.get("resolved_at"),
+                    status=status
+                )
+                s_status = sla["sla_status"]
+                if s_status in sla_counts:
+                    sla_counts[s_status] += 1
 
-        sla_compliance_rate = 0.0
-        if total_tickets > 0:
-            compliant = sla_counts["Healthy"] + sla_counts["Met"]
-            sla_compliance_rate = round((compliant / total_tickets) * 100, 1)
+            sla_compliance_rate = 0.0
+            if total_tickets > 0:
+                compliant = sla_counts["Healthy"] + sla_counts["Met"]
+                sla_compliance_rate = round((compliant / total_tickets) * 100, 1)
 
-        return {
-            "total_tickets": total_tickets,
-            "open_tickets": open_tickets,
-            "in_progress_tickets": in_progress_tickets,
-            "resolved_tickets": resolved_tickets,
-            "closed_tickets": closed_tickets,
-            "critical_tickets": critical_tickets,
-            "high_priority_tickets": high_tickets,
-            "critical_and_high": critical_tickets + high_tickets,
-            "sla_compliance_rate": sla_compliance_rate,
-            "sla_breakdown": sla_counts,
-            "category_distribution": category_counts,
-            "priority_distribution": priority_counts
-        }
+            return {
+                "total_tickets": total_tickets,
+                "open_tickets": open_tickets,
+                "in_progress_tickets": in_progress_tickets,
+                "resolved_tickets": resolved_tickets,
+                "closed_tickets": closed_tickets,
+                "critical_tickets": critical_tickets,
+                "high_priority_tickets": high_tickets,
+                "critical_and_high": critical_tickets + high_tickets,
+                "sla_compliance_rate": sla_compliance_rate,
+                "sla_breakdown": sla_counts,
+                "category_distribution": category_counts,
+                "priority_distribution": priority_counts
+            }
+        except Exception as e:
+            mark_mongo_inactive(str(e))
 
     # SQLite
     conn = get_db_connection()
@@ -1365,12 +1392,15 @@ def get_dashboard_statistics() -> Dict[str, Any]:
 def record_kb_feedback(article_id: str, helpful: bool):
     now_iso = datetime.now(timezone.utc).isoformat()
     if is_mongo_active():
-        _mongo_db.kb_feedback.insert_one({
-            "article_id": article_id,
-            "helpful": 1 if helpful else 0,
-            "timestamp": now_iso
-        })
-        return
+        try:
+            _mongo_db.kb_feedback.insert_one({
+                "article_id": article_id,
+                "helpful": 1 if helpful else 0,
+                "timestamp": now_iso
+            })
+            return
+        except Exception as e:
+            mark_mongo_inactive(str(e))
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1383,21 +1413,24 @@ def record_kb_feedback(article_id: str, helpful: bool):
 
 def get_kb_feedback_stats() -> Dict[str, Dict[str, int]]:
     if is_mongo_active():
-        pipeline = [
-            {"$group": {
-                "_id": "$article_id",
-                "helpful": {"$sum": {"$cond": [{"$eq": ["$helpful", 1]}, 1, 0]}},
-                "not_helpful": {"$sum": {"$cond": [{"$eq": ["$helpful", 0]}, 1, 0]}}
-            }}
-        ]
-        res = _mongo_db.kb_feedback.aggregate(pipeline)
-        stats = {}
-        for r in res:
-            stats[r["_id"]] = {
-                "helpful": r["helpful"] or 0,
-                "not_helpful": r["not_helpful"] or 0
-            }
-        return stats
+        try:
+            pipeline = [
+                {"$group": {
+                    "_id": "$article_id",
+                    "helpful": {"$sum": {"$cond": [{"$eq": ["$helpful", 1]}, 1, 0]}},
+                    "not_helpful": {"$sum": {"$cond": [{"$eq": ["$helpful", 0]}, 1, 0]}}
+                }}
+            ]
+            res = _mongo_db.kb_feedback.aggregate(pipeline)
+            stats = {}
+            for r in res:
+                stats[r["_id"]] = {
+                    "helpful": r["helpful"] or 0,
+                    "not_helpful": r["not_helpful"] or 0
+                }
+            return stats
+        except Exception as e:
+            mark_mongo_inactive(str(e))
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1439,8 +1472,20 @@ def add_ticket_comment(ticket_id: str, comment_data: Dict[str, Any]) -> Dict[str
     }
 
     if is_mongo_active():
-        _mongo_db.ticket_comments.insert_one(dict(record))
-        _mongo_db.tickets.update_one({"id": ticket_id}, {"$set": {"updated_at": now_iso}})
+        try:
+            _mongo_db.ticket_comments.insert_one(dict(record))
+            _mongo_db.tickets.update_one({"id": ticket_id}, {"$set": {"updated_at": now_iso}})
+        except Exception as e:
+            mark_mongo_inactive(str(e))
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+            INSERT INTO ticket_comments (id, ticket_id, author, author_role, body, is_internal, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (cid, ticket_id, author, author_role, body, 1 if is_internal else 0, now_iso))
+            cursor.execute("UPDATE tickets SET updated_at = ? WHERE id = ?", (now_iso, ticket_id))
+            conn.commit()
+            conn.close()
     else:
         conn = get_db_connection()
         cursor = conn.cursor()
@@ -1468,11 +1513,14 @@ def add_ticket_comment(ticket_id: str, comment_data: Dict[str, Any]) -> Dict[str
 def get_ticket_comments(ticket_id: str) -> List[Dict[str, Any]]:
     """Retrieves all comments/work notes for a ticket, chronologically ordered."""
     if is_mongo_active():
-        cursor = _mongo_db.ticket_comments.find(
-            {"ticket_id": ticket_id},
-            {"_id": 0}
-        ).sort("created_at", ASCENDING)
-        return list(cursor)
+        try:
+            cursor = _mongo_db.ticket_comments.find(
+                {"ticket_id": ticket_id},
+                {"_id": 0}
+            ).sort("created_at", ASCENDING)
+            return list(cursor)
+        except Exception as e:
+            mark_mongo_inactive(str(e))
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1504,4 +1552,5 @@ def save_knowledge_article_cloud(article_data: Dict[str, Any]):
             )
         except Exception as e:
             print(f"[MongoDB] Could not sync KB article: {e}")
+            mark_mongo_inactive(str(e))
 

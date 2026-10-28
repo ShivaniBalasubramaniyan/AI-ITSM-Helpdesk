@@ -421,8 +421,12 @@ def list_knowledge_articles(
     category: Optional[str] = Query(default=None, description="Filter articles by category"),
     search: Optional[str] = Query(default=None, description="Search term across articles")
 ):
-    articles = kb_service.list_articles(category=category, search=search)
-    return articles
+    try:
+        articles = kb_service.list_articles(category=category, search=search)
+        return articles
+    except Exception as e:
+        print(f"[API Error] /api/knowledge: {e}")
+        return []
 
 @app.get("/api/knowledge/{article_id}", response_model=KBArticleDetail)
 def get_knowledge_article(article_id: str):

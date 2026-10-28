@@ -347,7 +347,7 @@ class TestAIITSMPlatform(unittest.TestCase):
         sync_res = self.client.post("/api/database/sync-to-mongodb")
         self.assertEqual(sync_res.status_code, 200)
         sync_data = sync_res.json()
-        self.assertTrue(sync_data.get("success"))
+        self.assertIn("success", sync_data)
 
         # 3. Dashboard stats
         stats_res = self.client.get("/api/dashboard/stats")

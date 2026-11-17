@@ -19,10 +19,10 @@ An enterprise-grade, hackathon-ready ITSM platform featuring automated incident 
 ## System Architecture & URLs
 
 - **Frontend (Vite Dev)**: `http://localhost:3000`
-- **Backend API (FastAPI)**: `http://127.0.0.1:8000`
-- **FastAPI Interactive Docs (Swagger)**: `http://127.0.0.1:8000/docs`
-- **API Health Check**: `http://127.0.0.1:8000/api/health`
-- **Unified Hosted App (FastAPI serving built frontend)**: `http://127.0.0.1:8000/`
+- **Backend API (FastAPI)**: `http://127.0.0.1:8001`
+- **FastAPI Interactive Docs (Swagger)**: `http://127.0.0.1:8001/docs`
+- **API Health Check**: `http://127.0.0.1:8001/api/health`
+- **Unified Hosted App (FastAPI serving built frontend)**: `http://127.0.0.1:8001/`
 
 ---
 
@@ -43,7 +43,7 @@ python -m venv venv
 # Install dependencies
 pip install -r requirements.txt
 
-# Start FastAPI server (Port 8000)
+# Start FastAPI server (Port 8001)
 python main.py
 ```
 *The backend automatically initializes `itsm.db` and seeds sample IT incidents on first startup.*
@@ -77,7 +77,7 @@ OPENAI_API_KEY=your_openai_api_key_here
 GEMINI_API_KEY=your_gemini_api_key_here
 
 # Optional API URL override for frontend (defaults to proxy /api)
-VITE_API_URL=http://127.0.0.1:8000
+VITE_API_URL=http://127.0.0.1:8001
 ```
 
 ---
@@ -85,7 +85,7 @@ VITE_API_URL=http://127.0.0.1:8000
 ## Hackathon Demo Walkthrough (What to Demonstrate)
 
 1. **Executive Dashboard**:
-   - Open `http://localhost:3000` (or `http://127.0.0.1:8000`).
+   - Open `http://localhost:3000` (or `http://127.0.0.1:8001`).
    - Showcase the KPI cards (Total Incidents, Active, Resolved, Critical/High, and SLA Compliance rate).
    - Point out the dynamic SLA breakdown bar (Healthy vs At Risk vs Breached vs Met) and the category distribution chart.
 
@@ -121,4 +121,4 @@ VITE_API_URL=http://127.0.0.1:8000
    - Click **"👍 Helpful"** to show instant community feedback counter updates.
 
 7. **FastAPI OpenAPI Swagger Documentation**:
-   - Open `http://127.0.0.1:8000/docs` to demonstrate the clean, validated REST API endpoints.
+   - Open `http://127.0.0.1:8001/docs` to demonstrate the clean, validated REST API endpoints.

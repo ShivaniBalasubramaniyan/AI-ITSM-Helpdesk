@@ -277,6 +277,7 @@ export default function KnowledgeBase({ selectedArticleId, onCloseDetail, addToa
   const [loadingArticle, setLoadingArticle] = useState(false);
   const [feedbackGiven, setFeedbackGiven] = useState({});
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [loadError, setLoadError] = useState(null);
 
   const categories = [
     'All',
@@ -302,12 +303,14 @@ export default function KnowledgeBase({ selectedArticleId, onCloseDetail, addToa
   const loadArticles = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const data = await api.getKnowledgeArticles(
         category === 'All' ? null : category,
         search ? search : null
       );
-      setArticles(data);
+      setArticles(data || []);
     } catch (err) {
+      setLoadError(err.message);
       if (addToast) addToast(`Error loading knowledge articles: ${err.message}`, 'error');
     } finally {
       setLoading(false);
@@ -500,11 +503,26 @@ export default function KnowledgeBase({ selectedArticleId, onCloseDetail, addToa
           )}
         </div>
       ) : (
-        /* Articles Grid */
         loading ? (
           <div className="kb-loading-state">
             <div className="loading-spinner" />
             <p>Indexing enterprise documentation runbooks...</p>
+          </div>
+        ) : loadError ? (
+          <div className="glass-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+            <p style={{ color: '#ef4444', fontWeight: 600, fontSize: '1rem', marginBottom: 8 }}>
+              Unable to load knowledge articles
+            </p>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginBottom: 20 }}>
+              {loadError}
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={loadArticles}
+            >
+              🔄 Retry Loading
+            </button>
           </div>
         ) : articles.length === 0 ? (
           <div className="glass-card" style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-muted)' }}>

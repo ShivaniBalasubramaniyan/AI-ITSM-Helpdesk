@@ -13,6 +13,9 @@ for p in [backend_dir, project_dir]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from dotenv import load_dotenv
+load_dotenv(os.path.join(backend_dir, ".env"))
+
 import csv
 import io
 from datetime import datetime, timezone
@@ -481,4 +484,7 @@ def serve_root():
 # -------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    host = os.getenv("HOST", "127.0.0.1")
+    port = int(os.getenv("PORT", "8001"))
+    print(f"Starting AI-ITSM Helpdesk FastAPI Backend on http://{host}:{port}")
+    uvicorn.run("main:app", host=host, port=port, reload=True)
